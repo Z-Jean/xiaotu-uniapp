@@ -1,0 +1,42 @@
+{
+  "name": "xiaotuxian-server",
+  "version": "1.0.0",
+  "description": "小兔鲜儿本地后端服务",
+  "main": "app.ts",
+  "scripts": {
+    "dev": "tsx watch app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "typecheck": "tsc --noEmit",
+    "crawl": "tsx scripts/crawl.ts",
+    "init-db": "tsx scripts/init-db.ts"
+  },
+  "dependencies": {
+    "@alicloud/openapi-client": "^0.4.15",
+    "@langchain/core": "^1.1.48",
+    "ali-oss": "^6.23.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "langchain": "^1.4.2",
+    "multer": "^2.1.1",
+    "mysql2": "^3.6.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
