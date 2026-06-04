@@ -21,8 +21,18 @@ services:
       - DB_USER=root
       - DB_PASSWORD=${DB_PASSWORD:-123456}
       - DB_NAME=xiaotuxian
-      - JWT_SECRET=${JWT_SECRET:-your-secret-key}
+      - JWT_SECRET=${JWT_SECRET:-xiaotuxian-jwt-secret-key-2026}
       - PORT=3000
+      - MIMO_API_KEY=${MIMO_API_KEY}
+      - AMAP_KEY=${AMAP_KEY}
+      - OSS_REGION=${OSS_REGION:-oss-cn-beijing}
+      - OSS_BUCKET=${OSS_BUCKET:-jean-os}
+      - OSS_ACCESS_KEY_ID=${OSS_ACCESS_KEY_ID}
+      - OSS_ACCESS_KEY_SECRET=${OSS_ACCESS_KEY_SECRET}
+      - SMS_ACCESS_KEY_ID=${SMS_ACCESS_KEY_ID}
+      - SMS_ACCESS_KEY_SECRET=${SMS_ACCESS_KEY_SECRET}
+      - SMS_SIGN_NAME=${SMS_SIGN_NAME:-速通互联验证码}
+      - SMS_TEMPLATE_CODE=${SMS_TEMPLATE_CODE:-100001}
     depends_on:
       mysql:
         condition: service_healthy
