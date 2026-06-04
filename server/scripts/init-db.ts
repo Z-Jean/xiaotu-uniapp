@@ -3,7 +3,11 @@ import bcrypt from 'bcryptjs'
 
 async function main() {
   const conn = await mysql.createConnection({
-    host: 'localhost', port: 3306, user: 'root', password: 'root', multipleStatements: true,
+    host: process.env.DB_HOST || 'localhost',
+    port: Number(process.env.DB_PORT) || 3306,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'root',
+    multipleStatements: true,
   })
 
   console.log('连接 MySQL 成功，正在创建数据库...')
