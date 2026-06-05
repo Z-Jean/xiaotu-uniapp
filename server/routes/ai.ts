@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express'
-import db from '../config/db'
+import { Op } from 'sequelize'
+import sequelize from '../config/db'
+import { Goods, GoodsCategory } from '../models'
 import { DynamicStructuredTool } from '@langchain/core/tools'
 import { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { BaseMessage, AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages'
@@ -84,17 +86,18 @@ const searchGoodsTool = new DynamicStructuredTool({
   }),
   func: async (input) => {
     const keyword = input.keyword
-    const [rows] = (await db.query(
-      `SELECT g.id, g.name, g.price, g.main_pictures AS pictures FROM goods g WHERE g.name LIKE ? LIMIT 5`,
-      [`%${keyword}%`],
-    )) as any[]
+    const rows = await Goods.findAll({
+      where: { name: { [Op.like]: `%${keyword}%` } },
+      limit: 5,
+      attributes: ['id', 'name', 'price', 'main_pictures'],
+    })
     if (!rows.length) return '未找到相关商品'
     return JSON.stringify(
       rows.map((r: any) => ({
         id: String(r.id),
         name: r.name,
         price: r.price,
-        picture: Array.isArray(r.pictures) ? r.pictures[0] : '',
+        picture: Array.isArray(r.main_pictures) ? r.main_pictures[0] : '',
       })),
     )
   },
@@ -108,20 +111,25 @@ const categoryGoodsTool = new DynamicStructuredTool({
   }),
   func: async (input) => {
     const category = input.category
-    const [rows] = (await db.query(
-      `SELECT g.id, g.name, g.price, g.main_pictures AS pictures
-       FROM goods g
-       JOIN goods_categories gc ON g.category_id = gc.id
-       WHERE gc.name LIKE ? LIMIT 5`,
-      [`%${category}%`],
-    )) as any[]
+    // 先找到分类
+    const cat = await GoodsCategory.findOne({
+      where: { name: { [Op.like]: `%${category}%` } },
+      attributes: ['id'],
+    })
+    if (!cat) return '该分类下暂无商品'
+
+    const rows = await Goods.findAll({
+      where: { category_id: cat.id },
+      limit: 5,
+      attributes: ['id', 'name', 'price', 'main_pictures'],
+    })
     if (!rows.length) return '该分类下暂无商品'
     return JSON.stringify(
       rows.map((r: any) => ({
         id: String(r.id),
         name: r.name,
         price: r.price,
-        picture: Array.isArray(r.pictures) ? r.pictures[0] : '',
+        picture: Array.isArray(r.main_pictures) ? r.main_pictures[0] : '',
       })),
     )
   },
@@ -135,16 +143,17 @@ const recommendTool = new DynamicStructuredTool({
   }),
   func: async (input) => {
     const limit = input.limit || 5
-    const [rows] = (await db.query(
-      'SELECT id, name, price, main_pictures AS pictures FROM goods ORDER BY RAND() LIMIT ?',
-      [limit],
-    )) as any[]
+    const rows = await Goods.findAll({
+      order: sequelize.random(),
+      limit,
+      attributes: ['id', 'name', 'price', 'main_pictures'],
+    })
     return JSON.stringify(
       rows.map((r: any) => ({
         id: String(r.id),
         name: r.name,
         price: r.price,
-        picture: Array.isArray(r.pictures) ? r.pictures[0] : '',
+        picture: Array.isArray(r.main_pictures) ? r.main_pictures[0] : '',
       })),
     )
   },
@@ -364,7 +373,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     let buffer = ''
     let fullReply = ''
 
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read()
       if (done) break
 
@@ -555,7 +564,7 @@ router.post('/analyze-image/stream', async (req: Request, res: Response) => {
     let buffer = ''
     let fullReply = ''
 
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read()
       if (done) break
 

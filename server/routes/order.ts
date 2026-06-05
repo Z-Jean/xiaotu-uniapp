@@ -1,42 +1,71 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { fn, col, Op } from 'sequelize'
+import { Order, OrderSku, CartItem, GoodsSku, Goods, Address } from '../models'
 import auth from '../middleware/auth'
+import sequelize from '../config/db'
 
 const router = Router()
 
 // GET /member/order/pre
 router.get('/pre', auth, async (req, res) => {
   try {
-    const [cartItems] = await db.query(`
-      SELECT c.sku_id AS skuId, c.count, g.name, g.main_pictures AS pictures, g.price
-      FROM cart_items c
-      LEFT JOIN goods_skus gs ON c.sku_id = gs.id
-      LEFT JOIN goods g ON gs.goods_id = g.id
-      WHERE c.user_id = ? AND c.selected = 1
-    `, [req.userId]) as any[]
+    const cartItems = await CartItem.findAll({
+      where: { user_id: req.userId, selected: 1 },
+      include: [
+        {
+          model: GoodsSku,
+          as: 'sku',
+          attributes: ['id', 'price'],
+          include: [
+            {
+              model: Goods,
+              as: 'goods',
+              attributes: ['id', 'name', 'main_pictures', 'price'],
+            },
+          ],
+        },
+      ],
+    })
 
-    const goods = cartItems.map((item: any, i: number) => ({
-      id: String(i + 1),
-      skuId: String(item.skuId),
-      name: item.name || '',
-      picture: Array.isArray(item.pictures) ? item.pictures[0] : '',
-      count: item.count,
-      price: String(item.price),
-      payPrice: String(item.price),
-      totalPrice: String(item.price * item.count),
-      totalPayPrice: String(item.price * item.count),
-      attrsText: '',
-    }))
+    const goods = cartItems.map((item: any, i: number) => {
+      const sku = item.sku
+      const goodsInfo = sku?.goods
+      const pictures = goodsInfo?.main_pictures
+      const price = goodsInfo?.price || sku?.price
+      return {
+        id: String(i + 1),
+        skuId: String(item.sku_id),
+        name: goodsInfo?.name || '',
+        picture: Array.isArray(pictures) ? pictures[0] : '',
+        count: item.count,
+        price: String(price),
+        payPrice: String(price),
+        totalPrice: String(price * item.count),
+        totalPayPrice: String(price * item.count),
+        attrsText: '',
+      }
+    })
 
     const totalPrice = goods.reduce((sum: number, g: any) => sum + parseFloat(g.totalPrice), 0)
 
-    const [addresses] = await db.query(
-      'SELECT id, receiver, contact, province_code AS provinceCode, city_code AS cityCode, county_code AS countyCode, full_location AS fullLocation, address, is_default AS isDefault FROM addresses WHERE user_id = ?',
-      [req.userId]
-    )
+    const addresses = await Address.findAll({
+      where: { user_id: req.userId },
+      attributes: [
+        'id',
+        'receiver',
+        'contact',
+        'province_code',
+        'city_code',
+        'county_code',
+        'full_location',
+        'address',
+        'is_default',
+      ],
+    })
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
         goods,
         summary: { totalPrice, postFee: 0, totalPayPrice: totalPrice },
@@ -53,34 +82,66 @@ router.get('/pre', auth, async (req, res) => {
 router.get('/pre/now', auth, async (req, res) => {
   try {
     const { skuId, count = 1 } = req.query
-    const [skus] = await db.query(`
-      SELECT gs.id AS skuId, g.name, g.main_pictures AS pictures, gs.price
-      FROM goods_skus gs LEFT JOIN goods g ON gs.goods_id = g.id WHERE gs.id = ?
-    `, [skuId]) as any[]
 
-    if (!skus.length) {
+    const sku = await GoodsSku.findByPk(skuId as string, {
+      include: [
+        {
+          model: Goods,
+          as: 'goods',
+          attributes: ['id', 'name', 'main_pictures', 'price'],
+        },
+      ],
+    })
+
+    if (!sku) {
       res.json({ code: '0', msg: '商品不存在', result: null })
       return
     }
 
-    const item = skus[0]
-    const goods = [{
-      id: '1', skuId: String(item.skuId), name: item.name || '',
-      picture: Array.isArray(item.pictures) ? item.pictures[0] : '',
-      count: parseInt(count as string), price: String(item.price), payPrice: String(item.price),
-      totalPrice: String(item.price * parseInt(count as string)),
-      totalPayPrice: String(item.price * parseInt(count as string)), attrsText: '',
-    }]
+    const goodsInfo = (sku as any).goods
+    const pictures = goodsInfo?.main_pictures
+    const price = goodsInfo?.price || (sku as any).price
+    const quantity = parseInt(count as string)
+
+    const goods = [
+      {
+        id: '1',
+        skuId: String(skuId),
+        name: goodsInfo?.name || '',
+        picture: Array.isArray(pictures) ? pictures[0] : '',
+        count: quantity,
+        price: String(price),
+        payPrice: String(price),
+        totalPrice: String(price * quantity),
+        totalPayPrice: String(price * quantity),
+        attrsText: '',
+      },
+    ]
 
     const totalPrice = parseFloat(goods[0].totalPrice)
-    const [addresses] = await db.query(
-      'SELECT id, receiver, contact, province_code AS provinceCode, city_code AS cityCode, county_code AS countyCode, full_location AS fullLocation, address, is_default AS isDefault FROM addresses WHERE user_id = ?',
-      [req.userId]
-    )
+    const addresses = await Address.findAll({
+      where: { user_id: req.userId },
+      attributes: [
+        'id',
+        'receiver',
+        'contact',
+        'province_code',
+        'city_code',
+        'county_code',
+        'full_location',
+        'address',
+        'is_default',
+      ],
+    })
 
     res.json({
-      code: '1', msg: '操作成功',
-      result: { goods, summary: { totalPrice, postFee: 0, totalPayPrice: totalPrice }, userAddresses: addresses },
+      code: '1',
+      msg: '操作成功',
+      result: {
+        goods,
+        summary: { totalPrice, postFee: 0, totalPayPrice: totalPrice },
+        userAddresses: addresses,
+      },
     })
   } catch (err) {
     console.error(err)
@@ -91,26 +152,48 @@ router.get('/pre/now', auth, async (req, res) => {
 // GET /member/order/repurchase/:id
 router.get('/repurchase/:id', auth, async (req, res) => {
   try {
-    const [orderSkus] = await db.query(
-      'SELECT sku_id AS skuId, name, image AS picture, quantity AS count, cur_price AS price FROM order_skus WHERE order_id = ?',
-      [req.params.id]
-    ) as any[]
+    const orderSkus = await OrderSku.findAll({
+      where: { order_id: req.params.id },
+      attributes: ['sku_id', 'name', 'image', 'quantity', 'cur_price'],
+    })
 
     const goods = orderSkus.map((item: any, i: number) => ({
-      id: String(i + 1), skuId: String(item.skuId), name: item.name || '', picture: item.picture || '',
-      count: item.count, price: String(item.price), payPrice: String(item.price),
-      totalPrice: String(item.price * item.count), totalPayPrice: String(item.price * item.count), attrsText: '',
+      id: String(i + 1),
+      skuId: String(item.sku_id),
+      name: item.name || '',
+      picture: item.image || '',
+      count: item.quantity,
+      price: String(item.cur_price),
+      payPrice: String(item.cur_price),
+      totalPrice: String(item.cur_price * item.quantity),
+      totalPayPrice: String(item.cur_price * item.quantity),
+      attrsText: '',
     }))
 
     const totalPrice = goods.reduce((sum: number, g: any) => sum + parseFloat(g.totalPrice), 0)
-    const [addresses] = await db.query(
-      'SELECT id, receiver, contact, province_code AS provinceCode, city_code AS cityCode, county_code AS countyCode, full_location AS fullLocation, address, is_default AS isDefault FROM addresses WHERE user_id = ?',
-      [req.userId]
-    )
+    const addresses = await Address.findAll({
+      where: { user_id: req.userId },
+      attributes: [
+        'id',
+        'receiver',
+        'contact',
+        'province_code',
+        'city_code',
+        'county_code',
+        'full_location',
+        'address',
+        'is_default',
+      ],
+    })
 
     res.json({
-      code: '1', msg: '操作成功',
-      result: { goods, summary: { totalPrice, postFee: 0, totalPayPrice: totalPrice }, userAddresses: addresses },
+      code: '1',
+      msg: '操作成功',
+      result: {
+        goods,
+        summary: { totalPrice, postFee: 0, totalPayPrice: totalPrice },
+        userAddresses: addresses,
+      },
     })
   } catch (err) {
     console.error(err)
@@ -121,50 +204,79 @@ router.get('/repurchase/:id', auth, async (req, res) => {
 // POST /member/order
 router.post('/', auth, async (req, res) => {
   try {
-    const { addressId, deliveryTimeType = 1, buyerMessage = '', goods = [], payChannel = 2, payType = 1 } = req.body
+    const {
+      addressId,
+      deliveryTimeType = 1,
+      buyerMessage = '',
+      goods = [],
+      payChannel = 2,
+      payType = 1,
+    } = req.body
 
-    const [addresses] = await db.query('SELECT * FROM addresses WHERE id = ? AND user_id = ?', [addressId, req.userId]) as any[]
-    const address = addresses[0] || {}
+    const address = await Address.findOne({
+      where: { id: addressId, user_id: req.userId },
+    })
 
     let totalMoney = 0
     for (const g of goods) {
-      const [skus] = await db.query('SELECT price FROM goods_skus WHERE id = ?', [g.skuId]) as any[]
-      if (skus.length) totalMoney += skus[0].price * g.count
+      const sku = await GoodsSku.findByPk(g.skuId)
+      if (sku) totalMoney += sku.price * g.count
     }
 
     const orderNo = 'XTX' + Date.now() + Math.random().toString(36).slice(2, 6).toUpperCase()
 
-    const [result] = await db.query(
-      `INSERT INTO orders (order_no, user_id, order_state, address_snapshot, total_money, post_fee, pay_money, buyer_message, delivery_time_type, pay_type, pay_channel, countdown)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [orderNo, req.userId, 1, JSON.stringify(address), totalMoney, 0, totalMoney, buyerMessage, deliveryTimeType, payType, payChannel, 1800]
-    ) as any[]
-
-    const orderId = result.insertId
+    const order = await Order.create({
+      order_no: orderNo,
+      user_id: req.userId,
+      order_state: 1,
+      address_snapshot: address?.toJSON(),
+      total_money: totalMoney,
+      post_fee: 0,
+      pay_money: totalMoney,
+      buyer_message: buyerMessage,
+      delivery_time_type: deliveryTimeType,
+      pay_type: payType,
+      pay_channel: payChannel,
+      countdown: 1800,
+    })
 
     for (const g of goods) {
-      const [skus] = await db.query(`
-        SELECT gs.id, gs.price, g.name, g.main_pictures AS pictures, gs.specs
-        FROM goods_skus gs LEFT JOIN goods g ON gs.goods_id = g.id WHERE gs.id = ?
-      `, [g.skuId]) as any[]
-      if (skus.length) {
-        const s = skus[0]
-        const specs = typeof s.specs === 'string' ? JSON.parse(s.specs) : s.specs || []
+      const sku = await GoodsSku.findByPk(g.skuId, {
+        include: [
+          {
+            model: Goods,
+            as: 'goods',
+            attributes: ['id', 'name', 'main_pictures'],
+          },
+        ],
+      })
+      if (sku) {
+        const goodsInfo = (sku as any).goods
+        const specs = typeof sku.specs === 'string' ? JSON.parse(sku.specs) : sku.specs || []
         const attrsText = specs.map((sp: any) => sp.valueName).join(' ')
-        const picture = Array.isArray(s.pictures) ? s.pictures[0] : ''
-        await db.query(
-          'INSERT INTO order_skus (order_id, sku_id, name, image, attrs_text, quantity, cur_price) VALUES (?,?,?,?,?,?,?)',
-          [orderId, g.skuId, s.name, picture, attrsText, g.count, s.price]
-        )
+        const pictures = goodsInfo?.main_pictures
+        const picture = Array.isArray(pictures) ? pictures[0] : ''
+
+        await OrderSku.create({
+          order_id: order.id,
+          sku_id: g.skuId,
+          name: goodsInfo?.name || '',
+          image: picture,
+          attrs_text: attrsText,
+          quantity: g.count,
+          cur_price: sku.price,
+        })
       }
     }
 
     if (goods.length) {
       const skuIds = goods.map((g: any) => g.skuId)
-      await db.query('DELETE FROM cart_items WHERE user_id = ? AND sku_id IN (?)', [req.userId, skuIds])
+      await CartItem.destroy({
+        where: { user_id: req.userId, sku_id: skuIds },
+      })
     }
 
-    res.json({ code: '1', msg: '操作成功', result: { id: String(orderId) } })
+    res.json({ code: '1', msg: '操作成功', result: { id: String(order.id) } })
   } catch (err) {
     console.error(err)
     res.json({ code: '0', msg: '提交订单失败', result: null })
@@ -179,47 +291,71 @@ router.get('/', auth, async (req, res) => {
     const orderState = parseInt(req.query.orderState as string) || 0
     const offset = (page - 1) * pageSize
 
-    let where = 'WHERE o.user_id = ?'
-    const params: any[] = [req.userId]
-    if (orderState > 0) { where += ' AND o.order_state = ?'; params.push(orderState) }
+    const where: any = { user_id: req.userId }
+    if (orderState > 0) where.order_state = orderState
 
-    const [countResult] = await db.query(`SELECT COUNT(*) AS total FROM orders o ${where}`, params) as any[]
-    const total = countResult[0].total
-
-    const [orders] = await db.query(`
-      SELECT o.id, o.order_no AS orderNo, o.order_state AS orderState, o.countdown,
-             o.total_money AS totalMoney, o.post_fee AS postFee, o.pay_money AS payMoney,
-             o.created_at AS createTime
-      FROM orders o ${where} ORDER BY o.created_at DESC LIMIT ? OFFSET ?
-    `, [...params, pageSize, offset]) as any[]
+    const { count: total, rows: orders } = await Order.findAndCountAll({
+      where,
+      order: [['created_at', 'DESC']],
+      limit: pageSize,
+      offset,
+      attributes: [
+        'id',
+        'order_no',
+        'order_state',
+        'countdown',
+        'total_money',
+        'post_fee',
+        'pay_money',
+        'created_at',
+      ],
+    })
 
     const items: any[] = []
     for (const order of orders) {
-      const [skus] = await db.query(
-        'SELECT id, sku_id AS spuId, name, attrs_text AS attrsText, quantity, cur_price AS curPrice, image FROM order_skus WHERE order_id = ?',
-        [order.id]
-      ) as any[]
+      const skus = await OrderSku.findAll({
+        where: { order_id: order.id },
+        attributes: ['id', 'sku_id', 'name', 'attrs_text', 'quantity', 'cur_price', 'image'],
+      })
 
-      const [orderRow] = await db.query('SELECT address_snapshot FROM orders WHERE id = ?', [order.id]) as any[]
       let addressSnapshot: any = {}
-      if (orderRow.length && orderRow[0].address_snapshot) {
-        addressSnapshot = typeof orderRow[0].address_snapshot === 'string'
-          ? JSON.parse(orderRow[0].address_snapshot) : orderRow[0].address_snapshot
+      if (order.address_snapshot) {
+        addressSnapshot =
+          typeof order.address_snapshot === 'string'
+            ? JSON.parse(order.address_snapshot)
+            : order.address_snapshot
       }
 
       const fullLoc = addressSnapshot.fullLocation || addressSnapshot.full_location || ''
       const addrText = addressSnapshot.address || ''
+
       items.push({
-        id: String(order.id), orderState: order.orderState, countdown: order.countdown, skus,
-        receiverContact: addressSnapshot.receiver || '', receiverMobile: addressSnapshot.contact || '',
+        id: String(order.id),
+        orderState: order.order_state,
+        countdown: order.countdown,
+        skus: skus.map((s: any) => ({
+          id: s.id,
+          spuId: s.sku_id,
+          name: s.name,
+          attrsText: s.attrs_text,
+          quantity: s.quantity,
+          curPrice: s.cur_price,
+          image: s.image,
+        })),
+        receiverContact: addressSnapshot.receiver || '',
+        receiverMobile: addressSnapshot.contact || '',
         receiverAddress: fullLoc ? fullLoc + ' ' + addrText : addrText,
-        createTime: order.createTime, totalMoney: order.totalMoney, postFee: order.postFee,
-        payMoney: order.payMoney, totalNum: skus.reduce((sum: number, s: any) => sum + s.quantity, 0),
+        createTime: order.created_at,
+        totalMoney: order.total_money,
+        postFee: order.post_fee,
+        payMoney: order.pay_money,
+        totalNum: skus.reduce((sum: number, s: any) => sum + s.quantity, 0),
       })
     }
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: { items, counts: total, page, pages: Math.ceil(total / pageSize), pageSize },
     })
   } catch (err) {
@@ -231,30 +367,50 @@ router.get('/', auth, async (req, res) => {
 // GET /member/order/:id
 router.get('/:id', auth, async (req, res) => {
   try {
-    const [orders] = await db.query('SELECT * FROM orders WHERE id = ? AND user_id = ?', [req.params.id, req.userId]) as any[]
-    if (!orders.length) {
+    const order = await Order.findOne({
+      where: { id: req.params.id, user_id: req.userId },
+    })
+    if (!order) {
       res.json({ code: '0', msg: '订单不存在', result: null })
       return
     }
 
-    const order = orders[0]
-    const [skus] = await db.query(
-      'SELECT id, sku_id AS spuId, name, attrs_text AS attrsText, quantity, cur_price AS curPrice, image FROM order_skus WHERE order_id = ?',
-      [order.id]
-    ) as any[]
+    const skus = await OrderSku.findAll({
+      where: { order_id: order.id },
+      attributes: ['id', 'sku_id', 'name', 'attrs_text', 'quantity', 'cur_price', 'image'],
+    })
 
-    const address = typeof order.address_snapshot === 'string' ? JSON.parse(order.address_snapshot) : order.address_snapshot || {}
+    const address =
+      typeof order.address_snapshot === 'string'
+        ? JSON.parse(order.address_snapshot)
+        : order.address_snapshot || {}
     const fullLocation = address.fullLocation || address.full_location || ''
     const addr = address.address || ''
     const receiverAddress = fullLocation ? fullLocation + ' ' + addr : addr
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
-        id: String(order.id), orderState: order.order_state, countdown: order.countdown, skus,
-        receiverContact: address.receiver || '', receiverMobile: address.contact || '',
+        id: String(order.id),
+        orderState: order.order_state,
+        countdown: order.countdown,
+        skus: skus.map((s: any) => ({
+          id: s.id,
+          spuId: s.sku_id,
+          name: s.name,
+          attrsText: s.attrs_text,
+          quantity: s.quantity,
+          curPrice: s.cur_price,
+          image: s.image,
+        })),
+        receiverContact: address.receiver || '',
+        receiverMobile: address.contact || '',
         receiverAddress,
-        createTime: order.created_at, totalMoney: order.total_money, postFee: order.post_fee, payMoney: order.pay_money,
+        createTime: order.created_at,
+        totalMoney: order.total_money,
+        postFee: order.post_fee,
+        payMoney: order.pay_money,
       },
     })
   } catch (err) {
@@ -266,7 +422,10 @@ router.get('/:id', auth, async (req, res) => {
 // PUT /member/order/:id/cancel
 router.put('/:id/cancel', auth, async (req, res) => {
   try {
-    await db.query('UPDATE orders SET order_state = 6 WHERE id = ? AND user_id = ? AND order_state = 1', [req.params.id, req.userId])
+    await Order.update(
+      { order_state: 6 },
+      { where: { id: req.params.id, user_id: req.userId, order_state: 1 } },
+    )
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
     console.error(err)
@@ -277,7 +436,10 @@ router.put('/:id/cancel', auth, async (req, res) => {
 // PUT /member/order/:id/receipt
 router.put('/:id/receipt', auth, async (req, res) => {
   try {
-    await db.query('UPDATE orders SET order_state = 4 WHERE id = ? AND user_id = ? AND order_state = 3', [req.params.id, req.userId])
+    await Order.update(
+      { order_state: 4 },
+      { where: { id: req.params.id, user_id: req.userId, order_state: 3 } },
+    )
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
     console.error(err)
@@ -289,14 +451,19 @@ router.put('/:id/receipt', auth, async (req, res) => {
 router.get('/:id/logistics', auth, async (_req, res) => {
   try {
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
         company: { name: '顺丰速运', number: 'SF1234567890', tel: '95338' },
         count: 1,
         list: [
           { id: '1', text: '已签收，签收人：本人签收', time: new Date().toISOString() },
           { id: '2', text: '派件中', time: new Date(Date.now() - 86400000).toISOString() },
-          { id: '3', text: '已到达目的地城市', time: new Date(Date.now() - 172800000).toISOString() },
+          {
+            id: '3',
+            text: '已到达目的地城市',
+            time: new Date(Date.now() - 172800000).toISOString(),
+          },
         ],
       },
     })
@@ -309,7 +476,10 @@ router.get('/:id/logistics', auth, async (_req, res) => {
 // GET /member/order/consignment/:id
 router.get('/consignment/:id', auth, async (req, res) => {
   try {
-    await db.query('UPDATE orders SET order_state = 3 WHERE id = ? AND user_id = ? AND order_state = 2', [req.params.id, req.userId])
+    await Order.update(
+      { order_state: 3 },
+      { where: { id: req.params.id, user_id: req.userId, order_state: 2 } },
+    )
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
     console.error(err)
@@ -322,8 +492,8 @@ router.delete('/', auth, async (req, res) => {
   try {
     const { ids } = req.body
     if (ids && ids.length) {
-      await db.query('DELETE FROM order_skus WHERE order_id IN (?)', [ids])
-      await db.query('DELETE FROM orders WHERE id IN (?) AND user_id = ?', [ids, req.userId])
+      await OrderSku.destroy({ where: { order_id: ids } })
+      await Order.destroy({ where: { id: ids, user_id: req.userId } })
     }
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {

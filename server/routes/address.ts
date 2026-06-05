@@ -1,16 +1,27 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { Address } from '../models'
 import auth from '../middleware/auth'
+import { Op } from 'sequelize'
 
 const router = Router()
 
 // GET /member/address
 router.get('/', auth, async (req, res) => {
   try {
-    const [rows] = await db.query(
-      'SELECT id, receiver, contact, province_code AS provinceCode, city_code AS cityCode, county_code AS countyCode, full_location AS fullLocation, address, is_default AS isDefault FROM addresses WHERE user_id = ?',
-      [req.userId]
-    )
+    const rows = await Address.findAll({
+      where: { user_id: req.userId },
+      attributes: [
+        'id',
+        'receiver',
+        'contact',
+        'province_code',
+        'city_code',
+        'county_code',
+        'full_location',
+        'address',
+        'is_default',
+      ],
+    })
     res.json({ code: '1', msg: '操作成功', result: rows })
   } catch (err) {
     console.error(err)
@@ -21,15 +32,25 @@ router.get('/', auth, async (req, res) => {
 // GET /member/address/:id
 router.get('/:id', auth, async (req, res) => {
   try {
-    const [rows] = await db.query(
-      'SELECT id, receiver, contact, province_code AS provinceCode, city_code AS cityCode, county_code AS countyCode, full_location AS fullLocation, address, is_default AS isDefault FROM addresses WHERE id = ? AND user_id = ?',
-      [req.params.id, req.userId]
-    ) as any[]
-    if (!rows.length) {
+    const row = await Address.findOne({
+      where: { id: req.params.id, user_id: req.userId },
+      attributes: [
+        'id',
+        'receiver',
+        'contact',
+        'province_code',
+        'city_code',
+        'county_code',
+        'full_location',
+        'address',
+        'is_default',
+      ],
+    })
+    if (!row) {
       res.json({ code: '0', msg: '地址不存在', result: null })
       return
     }
-    res.json({ code: '1', msg: '操作成功', result: rows[0] })
+    res.json({ code: '1', msg: '操作成功', result: row })
   } catch (err) {
     console.error(err)
     res.json({ code: '0', msg: '获取地址详情失败', result: null })
@@ -39,15 +60,31 @@ router.get('/:id', auth, async (req, res) => {
 // POST /member/address
 router.post('/', auth, async (req, res) => {
   try {
-    const { receiver, contact, provinceCode, cityCode, countyCode, fullLocation, address, isDefault } = req.body
+    const {
+      receiver,
+      contact,
+      provinceCode,
+      cityCode,
+      countyCode,
+      fullLocation,
+      address,
+      isDefault,
+    } = req.body
     if (isDefault) {
-      await db.query('UPDATE addresses SET is_default = 0 WHERE user_id = ?', [req.userId])
+      await Address.update({ is_default: 0 }, { where: { user_id: req.userId } })
     }
-    const [result] = await db.query(
-      'INSERT INTO addresses (user_id, receiver, contact, province_code, city_code, county_code, full_location, address, is_default) VALUES (?,?,?,?,?,?,?,?,?)',
-      [req.userId, receiver, contact, provinceCode, cityCode, countyCode, fullLocation, address, isDefault ? 1 : 0]
-    ) as any[]
-    res.json({ code: '1', msg: '操作成功', result: { id: result.insertId } })
+    const row = await Address.create({
+      user_id: req.userId,
+      receiver,
+      contact,
+      province_code: provinceCode,
+      city_code: cityCode,
+      county_code: countyCode,
+      full_location: fullLocation,
+      address,
+      is_default: isDefault ? 1 : 0,
+    })
+    res.json({ code: '1', msg: '操作成功', result: { id: row.id } })
   } catch (err) {
     console.error(err)
     res.json({ code: '0', msg: '添加地址失败', result: null })
@@ -57,13 +94,31 @@ router.post('/', auth, async (req, res) => {
 // PUT /member/address/:id
 router.put('/:id', auth, async (req, res) => {
   try {
-    const { receiver, contact, provinceCode, cityCode, countyCode, fullLocation, address, isDefault } = req.body
+    const {
+      receiver,
+      contact,
+      provinceCode,
+      cityCode,
+      countyCode,
+      fullLocation,
+      address,
+      isDefault,
+    } = req.body
     if (isDefault) {
-      await db.query('UPDATE addresses SET is_default = 0 WHERE user_id = ?', [req.userId])
+      await Address.update({ is_default: 0 }, { where: { user_id: req.userId } })
     }
-    await db.query(
-      'UPDATE addresses SET receiver=?, contact=?, province_code=?, city_code=?, county_code=?, full_location=?, address=?, is_default=? WHERE id=? AND user_id=?',
-      [receiver, contact, provinceCode, cityCode, countyCode, fullLocation, address, isDefault ? 1 : 0, req.params.id, req.userId]
+    await Address.update(
+      {
+        receiver,
+        contact,
+        province_code: provinceCode,
+        city_code: cityCode,
+        county_code: countyCode,
+        full_location: fullLocation,
+        address,
+        is_default: isDefault ? 1 : 0,
+      },
+      { where: { id: req.params.id, user_id: req.userId } },
     )
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
@@ -75,7 +130,7 @@ router.put('/:id', auth, async (req, res) => {
 // DELETE /member/address/:id
 router.delete('/:id', auth, async (req, res) => {
   try {
-    await db.query('DELETE FROM addresses WHERE id = ? AND user_id = ?', [req.params.id, req.userId])
+    await Address.destroy({ where: { id: req.params.id, user_id: req.userId } })
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
     console.error(err)

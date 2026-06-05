@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { fn, col } from 'sequelize'
+import { Goods, GoodsSku, GoodsSpec } from '../models'
 
 const router = Router()
 
@@ -12,15 +13,14 @@ router.get('/', async (req, res) => {
       return
     }
 
-    const [goods] = await db.query('SELECT * FROM goods WHERE id = ?', [id]) as any[]
-    if (!goods.length) {
+    const g = await Goods.findByPk(id as string)
+    if (!g) {
       res.json({ code: '0', msg: '商品不存在', result: null })
       return
     }
 
-    const g = goods[0]
-
-    const [skus] = await db.query('SELECT * FROM goods_skus WHERE goods_id = ?', [id]) as any[]
+    // 查询 SKU 列表
+    const skus = await GoodsSku.findAll({ where: { goods_id: id } })
     const formattedSkus = skus.map((s: any) => ({
       id: String(s.id),
       skuCode: s.sku_code,
@@ -31,32 +31,48 @@ router.get('/', async (req, res) => {
       specs: typeof s.specs === 'string' ? JSON.parse(s.specs) : s.specs,
     }))
 
-    const [specs] = await db.query('SELECT id, goods_id, name, `values` FROM goods_specs WHERE goods_id = ?', [id]) as any[]
+    // 查询规格列表
+    const specs = await GoodsSpec.findAll({
+      where: { goods_id: id },
+      attributes: ['id', 'goods_id', 'name', 'values'],
+    })
     const formattedSpecs = specs.map((s: any) => ({
       name: s.name,
       values: typeof s.values === 'string' ? JSON.parse(s.values) : s.values,
     }))
 
-    const mainPictures = typeof g.main_pictures === 'string' ? JSON.parse(g.main_pictures) : g.main_pictures || []
-    const detailsPictures = typeof g.details_pictures === 'string' ? JSON.parse(g.details_pictures) : g.details_pictures || []
-    const detailsProperties = typeof g.details_properties === 'string' ? JSON.parse(g.details_properties) : g.details_properties || []
+    const mainPictures =
+      typeof g.main_pictures === 'string' ? JSON.parse(g.main_pictures) : g.main_pictures || []
+    const detailsPictures =
+      typeof g.details_pictures === 'string'
+        ? JSON.parse(g.details_pictures)
+        : g.details_pictures || []
+    const detailsProperties =
+      typeof g.details_properties === 'string'
+        ? JSON.parse(g.details_properties)
+        : g.details_properties || []
 
-    const [similar] = await db.query(
-      'SELECT id, name, `desc`, price, old_price AS discount, 0 AS orderNum, main_pictures AS pictures FROM goods WHERE category_id = ? AND id != ? LIMIT 10',
-      [g.category_id, id]
-    ) as any[]
-    const similarProducts = similar.map((s: any) => ({
-      id: String(s.id),
-      name: s.name,
-      desc: s.desc,
-      price: s.price,
-      discount: s.discount,
-      orderNum: s.orderNum,
-      picture: Array.isArray(s.pictures) ? s.pictures[0] : '',
-    }))
+    // 查询相似商品
+    const similar = await Goods.findAll({
+      where: { category_id: g.category_id },
+      limit: 10,
+      attributes: ['id', 'name', 'desc', 'price', 'old_price', 'main_pictures'],
+    })
+    const similarProducts = similar
+      .filter((s: any) => s.id !== Number(id))
+      .map((s: any) => ({
+        id: String(s.id),
+        name: s.name,
+        desc: s.desc,
+        price: s.price,
+        discount: s.old_price,
+        orderNum: 0,
+        picture: Array.isArray(s.main_pictures) ? s.main_pictures[0] : '',
+      }))
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
         id: String(g.id),
         name: g.name,

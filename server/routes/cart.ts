@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { fn, col, literal } from 'sequelize'
+import { CartItem, GoodsSku, Goods } from '../models'
 import auth from '../middleware/auth'
 
 const router = Router()
@@ -7,29 +8,42 @@ const router = Router()
 // GET /member/cart
 router.get('/', auth, async (req, res) => {
   try {
-    const [rows] = await db.query(`
-      SELECT c.id, c.sku_id AS skuId, g.name, g.main_pictures AS pictures,
-             c.count, g.price, g.price AS nowPrice, gs.inventory AS stock,
-             c.selected, '' AS attrsText, 1 AS isEffective
-      FROM cart_items c
-      LEFT JOIN goods_skus gs ON c.sku_id = gs.id
-      LEFT JOIN goods g ON gs.goods_id = g.id
-      WHERE c.user_id = ?
-    `, [req.userId]) as any[]
+    const rows = await CartItem.findAll({
+      where: { user_id: req.userId },
+      include: [
+        {
+          model: GoodsSku,
+          as: 'sku',
+          attributes: ['id', 'goods_id', 'price', 'inventory'],
+          include: [
+            {
+              model: Goods,
+              as: 'goods',
+              attributes: ['id', 'name', 'main_pictures', 'price'],
+            },
+          ],
+        },
+      ],
+    })
 
-    const result = rows.map((r: any) => ({
-      id: String(r.id),
-      skuId: String(r.skuId),
-      name: r.name || '',
-      picture: Array.isArray(r.pictures) ? r.pictures[0] : '',
-      count: r.count,
-      price: r.price,
-      nowPrice: r.nowPrice,
-      stock: r.stock || 999,
-      selected: !!r.selected,
-      attrsText: r.attrsText || '',
-      isEffective: !!r.isEffective,
-    }))
+    const result = rows.map((item: any) => {
+      const sku = item.sku
+      const goods = sku?.goods
+      const pictures = goods?.main_pictures
+      return {
+        id: String(item.id),
+        skuId: String(item.sku_id),
+        name: goods?.name || '',
+        picture: Array.isArray(pictures) ? pictures[0] : '',
+        count: item.count,
+        price: goods?.price || sku?.price,
+        nowPrice: goods?.price || sku?.price,
+        stock: sku?.inventory || 999,
+        selected: !!item.selected,
+        attrsText: '',
+        isEffective: true,
+      }
+    })
 
     res.json({ code: '1', msg: '操作成功', result })
   } catch (err) {
@@ -42,14 +56,18 @@ router.get('/', auth, async (req, res) => {
 router.post('/', auth, async (req, res) => {
   try {
     const { skuId, count = 1 } = req.body
-    const [existing] = await db.query(
-      'SELECT id, count FROM cart_items WHERE user_id = ? AND sku_id = ?',
-      [req.userId, skuId]
-    ) as any[]
-    if (existing.length) {
-      await db.query('UPDATE cart_items SET count = count + ? WHERE id = ?', [count, existing[0].id])
+    const existing = await CartItem.findOne({
+      where: { user_id: req.userId, sku_id: skuId },
+    })
+    if (existing) {
+      await existing.update({ count: existing.count + count })
     } else {
-      await db.query('INSERT INTO cart_items (user_id, sku_id, count, selected) VALUES (?,?,?,1)', [req.userId, skuId, count])
+      await CartItem.create({
+        user_id: req.userId,
+        sku_id: skuId,
+        count,
+        selected: 1,
+      })
     }
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
@@ -62,13 +80,14 @@ router.post('/', auth, async (req, res) => {
 router.put('/:skuId', auth, async (req, res) => {
   try {
     const { selected, count } = req.body
-    const updates: string[] = []
-    const params: any[] = []
-    if (selected !== undefined) { updates.push('selected = ?'); params.push(selected ? 1 : 0) }
-    if (count !== undefined) { updates.push('count = ?'); params.push(count) }
-    if (updates.length) {
-      params.push(req.userId, req.params.skuId)
-      await db.query(`UPDATE cart_items SET ${updates.join(',')} WHERE user_id = ? AND sku_id = ?`, params)
+    const updates: any = {}
+    if (selected !== undefined) updates.selected = selected ? 1 : 0
+    if (count !== undefined) updates.count = count
+
+    if (Object.keys(updates).length) {
+      await CartItem.update(updates, {
+        where: { user_id: req.userId, sku_id: req.params.skuId },
+      })
     }
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
@@ -81,7 +100,7 @@ router.put('/:skuId', auth, async (req, res) => {
 router.put('/selected', auth, async (req, res) => {
   try {
     const { selected } = req.body
-    await db.query('UPDATE cart_items SET selected = ? WHERE user_id = ?', [selected ? 1 : 0, req.userId])
+    await CartItem.update({ selected: selected ? 1 : 0 }, { where: { user_id: req.userId } })
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {
     console.error(err)
@@ -94,7 +113,9 @@ router.delete('/', auth, async (req, res) => {
   try {
     const { ids } = req.body
     if (ids && ids.length) {
-      await db.query('DELETE FROM cart_items WHERE user_id = ? AND sku_id IN (?)', [req.userId, ids])
+      await CartItem.destroy({
+        where: { user_id: req.userId, sku_id: ids },
+      })
     }
     res.json({ code: '1', msg: '操作成功', result: null })
   } catch (err) {

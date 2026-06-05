@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express'
 import * as OpenApiClient from '@alicloud/openapi-client'
-import db from '../config/db'
+import { Op } from 'sequelize'
+import { SmsCode, User } from '../models'
+import jwt from 'jsonwebtoken'
+import jwtConfig from '../config/jwt'
 
 const router = Router()
 
@@ -51,14 +54,15 @@ router.post('/send', async (req: Request, res: Response) => {
       return
     }
 
-    // 检查 60 秒内是否重复发送
-    const [recent] = await db.query(
-      `SELECT id FROM sms_codes
-       WHERE mobile = ? AND created_at > DATE_SUB(NOW(), INTERVAL 10 SECOND)
-       ORDER BY id DESC LIMIT 1`,
-      [mobile],
-    ) as any[]
-    if (recent.length > 0) {
+    // 检查 10 秒内是否重复发送
+    const recent = await SmsCode.findOne({
+      where: {
+        mobile,
+        created_at: { [Op.gt]: new Date(Date.now() - 10000) },
+      },
+      order: [['id', 'DESC']],
+    })
+    if (recent) {
       res.json({ code: '0', msg: '60 秒内不能重复发送', result: null })
       return
     }
@@ -68,10 +72,12 @@ router.post('/send', async (req: Request, res: Response) => {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000) // 5 分钟有效
 
     // 存入数据库
-    await db.query(
-      'INSERT INTO sms_codes (mobile, code, purpose, expires_at) VALUES (?, ?, ?, ?)',
-      [mobile, code, 'login', expiresAt],
-    )
+    await SmsCode.create({
+      mobile,
+      code,
+      purpose: 'login',
+      expires_at: expiresAt,
+    })
 
     // 调用阿里云号码认证服务 SendSmsVerifyCode
     const result = await callAliyunApi('SendSmsVerifyCode', {
@@ -106,48 +112,44 @@ router.post('/verify', async (req: Request, res: Response) => {
     }
 
     // 查找未使用且未过期的验证码
-    const [rows] = await db.query(
-      `SELECT id FROM sms_codes
-       WHERE mobile = ? AND code = ? AND used = 0 AND expires_at > NOW()
-       ORDER BY id DESC LIMIT 1`,
-      [mobile, code],
-    ) as any[]
+    const smsRecord = await SmsCode.findOne({
+      where: {
+        mobile,
+        code,
+        used: 0,
+        expires_at: { [Op.gt]: new Date() },
+      },
+      order: [['id', 'DESC']],
+    })
 
-    if (rows.length === 0) {
+    if (!smsRecord) {
       res.json({ code: '0', msg: '验证码错误或已过期', result: null })
       return
     }
 
     // 标记验证码已使用
-    await db.query('UPDATE sms_codes SET used = 1 WHERE id = ?', [rows[0].id])
+    await SmsCode.update({ used: 1 }, { where: { id: smsRecord.id } })
 
     // 查找用户，不存在则自动注册
-    const [users] = await db.query(
-      'SELECT id, account, nickname, avatar FROM users WHERE account = ?',
-      [mobile],
-    ) as any[]
-
-    let userId: number
+    let user = await User.findOne({ where: { account: mobile } })
     let nickname: string
 
-    if (users.length > 0) {
+    if (user) {
       // 已有用户，直接登录
-      userId = users[0].id
-      nickname = users[0].nickname || mobile
+      nickname = user.nickname || mobile
     } else {
       // 自动注册
-      const [result] = await db.query(
-        'INSERT INTO users (account, password, nickname, avatar) VALUES (?, ?, ?, ?)',
-        [mobile, '', `用户${mobile.slice(-4)}`, ''],
-      ) as any[]
-      userId = result.insertId
+      user = await User.create({
+        account: mobile,
+        password: '',
+        nickname: `用户${mobile.slice(-4)}`,
+        avatar: '',
+      })
       nickname = `用户${mobile.slice(-4)}`
     }
 
     // 生成 JWT token
-    const jwt = require('jsonwebtoken')
-    const jwtConfig = require('../config/jwt').default
-    const token = jwt.sign({ id: userId }, jwtConfig.secret, {
+    const token = jwt.sign({ id: user.id }, jwtConfig.secret, {
       expiresIn: jwtConfig.expiresIn,
     })
 
@@ -155,11 +157,11 @@ router.post('/verify', async (req: Request, res: Response) => {
       code: '1',
       msg: '登录成功',
       result: {
-        id: userId,
+        id: user.id,
         account: mobile,
         nickname,
         token,
-        avatar: users.length > 0 ? users[0].avatar : '',
+        avatar: user.avatar || '',
       },
     })
   } catch (err: any) {

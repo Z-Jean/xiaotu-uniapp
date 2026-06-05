@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { HotItem, Goods } from '../models'
 
 const router = Router()
 
@@ -22,52 +22,48 @@ router.get('/:type', async (req, res) => {
     const config = HOT_CONFIG[type] || HOT_CONFIG.preference
 
     // 获取热门推荐封面图
-    const [hotItems] = await db.query('SELECT pictures FROM hot_items LIMIT 1') as any[]
-    const bannerPicture = hotItems.length && Array.isArray(hotItems[0].pictures)
-      ? hotItems[0].pictures[0] : ''
+    const hotItem = await HotItem.findOne({ attributes: ['pictures'] })
+    const bannerPicture =
+      hotItem?.pictures && Array.isArray(hotItem.pictures) ? hotItem.pictures[0] : ''
 
     // 获取总数
-    const [countResult] = await db.query('SELECT COUNT(*) AS total FROM goods') as any[]
-    const total = countResult[0].total
+    const { count: total } = await Goods.findAndCountAll()
 
     // 为每个子类型构造商品列表
-    const subTypes = config.subTypes.map((title, index) => {
-      // 不同子类型使用不同的偏移量，让商品列表有差异
-      const subOffset = (offset + index * pageSize) % Math.max(total, 1)
-      return {
-        id: String(index + 1),
-        title,
-        goodsItems: {
-          items: [], // 会在下面填充
-          counts: total,
-          page,
-          pages: Math.ceil(total / pageSize),
-          pageSize,
-        },
-      }
-    })
+    const subTypes = await Promise.all(
+      config.subTypes.map(async (title, index) => {
+        const subOffset = (offset + index * pageSize) % Math.max(total, 1)
+        const goods = await Goods.findAll({
+          limit: pageSize,
+          offset: subOffset,
+          attributes: ['id', 'name', 'desc', 'price', 'old_price', 'main_pictures'],
+        })
 
-    // 查询商品（为每个子类型查询）
-    for (let i = 0; i < subTypes.length; i++) {
-      const subOffset = (offset + i * pageSize) % Math.max(total, 1)
-      const [goods] = await db.query(
-        'SELECT id, name, `desc`, price, old_price AS discount, 0 AS orderNum, main_pictures AS pictures FROM goods LIMIT ? OFFSET ?',
-        [pageSize, subOffset]
-      ) as any[]
-
-      subTypes[i].goodsItems.items = goods.map((g: any) => ({
-        id: String(g.id),
-        name: g.name,
-        desc: g.desc,
-        price: g.price,
-        discount: g.discount,
-        orderNum: g.orderNum,
-        picture: Array.isArray(g.pictures) ? g.pictures[0] : '',
-      }))
-    }
+        return {
+          id: String(index + 1),
+          title,
+          goodsItems: {
+            items: goods.map((g: any) => ({
+              id: String(g.id),
+              name: g.name,
+              desc: g.desc,
+              price: g.price,
+              discount: g.old_price,
+              orderNum: 0,
+              picture: Array.isArray(g.main_pictures) ? g.main_pictures[0] : '',
+            })),
+            counts: total,
+            page,
+            pages: Math.ceil(total / pageSize),
+            pageSize,
+          },
+        }
+      }),
+    )
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
         id: '1',
         bannerPicture,

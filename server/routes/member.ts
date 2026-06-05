@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import db from '../config/db'
+import { fn, col } from 'sequelize'
+import { User } from '../models'
 import auth from '../middleware/auth'
 
 const router = Router()
@@ -7,15 +8,24 @@ const router = Router()
 // GET /member/profile
 router.get('/', auth, async (req, res) => {
   try {
-    const [users] = await db.query(
-      'SELECT id, account, nickname, avatar, mobile, gender, DATE_FORMAT(birthday, "%Y-%m-%d") AS birthday, full_location AS fullLocation, profession FROM users WHERE id = ?',
-      [req.userId]
-    ) as any[]
-    if (!users.length) {
+    const user = await User.findByPk(req.userId, {
+      attributes: [
+        'id',
+        'account',
+        'nickname',
+        'avatar',
+        'mobile',
+        'gender',
+        'profession',
+        'full_location',
+        [fn('DATE_FORMAT', col('birthday'), '%Y-%m-%d'), 'birthday'],
+      ],
+    })
+    if (!user) {
       res.json({ code: '0', msg: '用户不存在', result: null })
       return
     }
-    res.json({ code: '1', msg: '操作成功', result: users[0] })
+    res.json({ code: '1', msg: '操作成功', result: user })
   } catch (err) {
     console.error(err)
     res.json({ code: '0', msg: '获取个人信息失败', result: null })
@@ -25,17 +35,44 @@ router.get('/', auth, async (req, res) => {
 // PUT /member/profile
 router.put('/', auth, async (req, res) => {
   try {
-    const { nickname, gender, birthday, profession, provinceCode, cityCode, countyCode, fullLocation } = req.body
-    await db.query(
-      'UPDATE users SET nickname=?, gender=?, birthday=?, profession=?, province_code=?, city_code=?, county_code=?, full_location=? WHERE id=?',
-      [nickname, gender, birthday, profession, provinceCode, cityCode, countyCode, fullLocation, req.userId]
+    const {
+      nickname,
+      gender,
+      birthday,
+      profession,
+      provinceCode,
+      cityCode,
+      countyCode,
+      fullLocation,
+    } = req.body
+    await User.update(
+      {
+        nickname,
+        gender,
+        birthday,
+        profession,
+        province_code: provinceCode,
+        city_code: cityCode,
+        county_code: countyCode,
+        full_location: fullLocation,
+      },
+      { where: { id: req.userId } },
     )
 
-    const [users] = await db.query(
-      'SELECT id, account, nickname, avatar, mobile, gender, DATE_FORMAT(birthday, "%Y-%m-%d") AS birthday, full_location AS fullLocation, profession FROM users WHERE id = ?',
-      [req.userId]
-    ) as any[]
-    res.json({ code: '1', msg: '操作成功', result: users[0] })
+    const user = await User.findByPk(req.userId, {
+      attributes: [
+        'id',
+        'account',
+        'nickname',
+        'avatar',
+        'mobile',
+        'gender',
+        'profession',
+        'full_location',
+        [fn('DATE_FORMAT', col('birthday'), '%Y-%m-%d'), 'birthday'],
+      ],
+    })
+    res.json({ code: '1', msg: '操作成功', result: user })
   } catch (err) {
     console.error(err)
     res.json({ code: '0', msg: '修改个人信息失败', result: null })
@@ -46,7 +83,7 @@ router.put('/', auth, async (req, res) => {
 router.post('/avatar', auth, async (req, res) => {
   try {
     const { avatar } = req.body
-    await db.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, req.userId])
+    await User.update({ avatar }, { where: { id: req.userId } })
     res.json({ code: '1', msg: '操作成功', result: { avatar } })
   } catch (err) {
     console.error(err)

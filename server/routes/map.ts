@@ -7,9 +7,11 @@ const AMAP_KEY = process.env.AMAP_KEY || ''
 // 高德地理编码：文字地址 → 经纬度
 async function geocode(address: string): Promise<{ lng: number; lat: number } | null> {
   try {
-    const url = `https://restapi.amap.com/v3/geocode/geo?address=${encodeURIComponent(address)}&key=${AMAP_KEY}`
+    const url = `https://restapi.amap.com/v3/geocode/geo?address=${encodeURIComponent(
+      address,
+    )}&key=${AMAP_KEY}`
     const res = await fetch(url)
-    const data = await res.json() as any
+    const data = (await res.json()) as any
     if (data.geocodes && data.geocodes.length) {
       const [lng, lat] = data.geocodes[0].location.split(',').map(Number)
       return { lng, lat }
@@ -28,7 +30,7 @@ async function drivingRoute(
   try {
     const url = `https://restapi.amap.com/v3/direction/driving?origin=${origin.lng},${origin.lat}&destination=${destination.lng},${destination.lat}&key=${AMAP_KEY}&strategy=0`
     const res = await fetch(url)
-    const data = await res.json() as any
+    const data = (await res.json()) as any
     if (data.route && data.route.paths && data.route.paths.length) {
       const path = data.route.paths[0]
       // 拼接所有步骤的坐标
@@ -85,7 +87,8 @@ router.get('/route', async (req, res) => {
     if (!route) {
       // 降级：只返回坐标，不画路线
       res.json({
-        code: '1', msg: '操作成功',
+        code: '1',
+        msg: '操作成功',
         result: {
           origin: { ...originCoord, name: originText },
           destination: { ...destCoord, name: destinationText },
@@ -104,7 +107,8 @@ router.get('/route', async (req, res) => {
     })
 
     res.json({
-      code: '1', msg: '操作成功',
+      code: '1',
+      msg: '操作成功',
       result: {
         origin: { ...originCoord, name: originText },
         destination: { ...destCoord, name: destinationText },

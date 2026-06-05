@@ -2,7 +2,7 @@ import { Router } from 'express'
 import multer from 'multer'
 import OSS from 'ali-oss'
 import auth from '../middleware/auth'
-import db from '../config/db'
+import { User } from '../models'
 
 const router = Router()
 
@@ -49,10 +49,11 @@ router.post('/avatar', auth, upload.single('file'), async (req, res) => {
     const avatarUrl = result.url
 
     // 更新用户头像
-    await db.query('UPDATE users SET avatar = ? WHERE id = ?', [avatarUrl, req.userId])
+    await User.update({ avatar: avatarUrl }, { where: { id: req.userId } })
 
     res.json({
-      code: '1', msg: '上传成功',
+      code: '1',
+      msg: '上传成功',
       result: { avatar: avatarUrl },
     })
   } catch (err) {
