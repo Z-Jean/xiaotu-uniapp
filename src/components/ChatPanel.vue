@@ -36,23 +36,12 @@ const scrollToId = ref('')
 const pendingImage = ref('')
 let msgId = 0
 
-// 穿搭推荐弹窗
-const showOutfitPopup = ref(false)
-const outfitDescription = ref('')
-
-// 确认穿搭推荐
-const confirmOutfit = () => {
-  if (!outfitDescription.value.trim()) return
-  showOutfitPopup.value = false
-  sendOutfitMessage(outfitDescription.value.trim())
-  outfitDescription.value = ''
-}
+// 聊天模式：normal / thinking / outfit
+const chatMode = ref<'normal' | 'thinking' | 'outfit'>('normal')
 
 // 快捷入口
 const quickActions = [
   { icon: '🛍️', text: '今日好物推荐', message: '推荐一些今日好物' },
-  { icon: '🧠', text: '深度思考', message: '帮我分析一下当前平台有什么值得买的商品' },
-  { icon: '👗', text: '穿搭推荐', message: '' },
   { icon: '🏠', text: '家居好物', message: '推荐一些好用的家居产品' },
   { icon: '📸', text: '图片分析', message: '' },
 ]
@@ -132,6 +121,13 @@ const sendMessage = async (text?: string) => {
   }
 
   if (!content || isLoading.value) return
+
+  // 穿搭推荐模式
+  if (chatMode.value === 'outfit') {
+    sendOutfitMessage(content)
+    inputText.value = ''
+    return
+  }
 
   // 添加用户消息
   messages.value.push({ id: ++msgId, role: 'user', content })
@@ -416,9 +412,7 @@ const normalImageChat = async (image: string, message: string) => {
 
 // 点击快捷入口
 const onQuickAction = (action: typeof quickActions[0]) => {
-  if (action.text === '穿搭推荐') {
-    showOutfitPopup.value = true
-  } else if (action.message) {
+  if (action.message) {
     sendMessage(action.message)
   } else {
     chooseImage()
@@ -546,28 +540,28 @@ const onGoodsClick = (goods: { id: string }) => {
         </view>
       </scroll-view>
 
-      <!-- 穿搭推荐输入弹窗 -->
-      <view class="outfit-popup-mask" v-if="showOutfitPopup" @tap="showOutfitPopup = false">
-        <view class="outfit-popup" @tap.stop>
-          <view class="outfit-popup-title">描述你想要的穿搭</view>
-          <input
-            class="outfit-popup-input"
-            v-model="outfitDescription"
-            placeholder="如：适合约会的春季穿搭"
-            confirm-type="send"
-            @confirm="confirmOutfit"
-          />
-          <view class="outfit-popup-actions">
-            <view class="outfit-popup-btn" @tap="showOutfitPopup = false">取消</view>
-            <view class="outfit-popup-btn primary" @tap="confirmOutfit">生成推荐</view>
-          </view>
-        </view>
-      </view>
-
       <!-- 待发送图片预览 -->
       <view v-if="pendingImage" class="pending-image-bar">
         <image class="pending-img" :src="pendingImage" mode="aspectFill" />
         <text class="pending-remove" @tap="removePendingImage">✕</text>
+      </view>
+
+      <!-- 模式切换 -->
+      <view class="mode-bar">
+        <view
+          class="mode-tag"
+          :class="{ active: chatMode === 'thinking' }"
+          @tap="chatMode = chatMode === 'thinking' ? 'normal' : 'thinking'"
+        >
+          🧠 深度思考
+        </view>
+        <view
+          class="mode-tag"
+          :class="{ active: chatMode === 'outfit' }"
+          @tap="chatMode = chatMode === 'outfit' ? 'normal' : 'outfit'"
+        >
+          👗 穿搭推荐
+        </view>
       </view>
 
       <!-- 输入框 -->
@@ -578,7 +572,7 @@ const onGoodsClick = (goods: { id: string }) => {
         <input
           class="input"
           v-model="inputText"
-          :placeholder="pendingImage ? '描述一下你想了解什么...' : '问我点什么吧...'"
+          :placeholder="chatMode === 'outfit' ? '描述你想要的穿搭...' : pendingImage ? '描述一下你想了解什么...' : '问我点什么吧...'"
           :disabled="isLoading"
           @confirm="sendMessage()"
         />
@@ -898,6 +892,27 @@ const onGoodsClick = (goods: { id: string }) => {
   overflow-y: auto;
 }
 
+.mode-bar {
+  display: flex;
+  gap: 16rpx;
+  padding: 12rpx 24rpx 0;
+  border-top: 1rpx solid #f0f0f0;
+
+  .mode-tag {
+    padding: 8rpx 20rpx;
+    border-radius: 24rpx;
+    font-size: 24rpx;
+    color: #999;
+    background-color: #f5f5f5;
+    transition: all 0.2s;
+
+    &.active {
+      color: #fff;
+      background-color: #27ba9b;
+    }
+  }
+}
+
 .input-bar {
   display: flex;
   align-items: center;
@@ -935,68 +950,6 @@ const onGoodsClick = (goods: { id: string }) => {
     &.active {
       background: #27ba9b;
     }
-  }
-}
-
-// 穿搭推荐输入弹窗
-.outfit-popup-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 999;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.outfit-popup {
-  width: 600rpx;
-  background-color: #fff;
-  border-radius: 20rpx;
-  padding: 40rpx;
-}
-
-.outfit-popup-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-  margin-bottom: 30rpx;
-}
-
-.outfit-popup-input {
-  width: 100%;
-  height: 80rpx;
-  border: 1rpx solid #ddd;
-  border-radius: 12rpx;
-  padding: 0 20rpx;
-  font-size: 28rpx;
-  box-sizing: border-box;
-}
-
-.outfit-popup-actions {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 30rpx;
-  gap: 20rpx;
-}
-
-.outfit-popup-btn {
-  flex: 1;
-  height: 72rpx;
-  line-height: 72rpx;
-  text-align: center;
-  border-radius: 72rpx;
-  border: 1rpx solid #ddd;
-  font-size: 28rpx;
-  color: #666;
-
-  &.primary {
-    color: #fff;
-    background-color: #27ba9b;
-    border-color: #27ba9b;
   }
 }
 
