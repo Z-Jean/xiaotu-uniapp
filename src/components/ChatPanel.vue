@@ -5,6 +5,7 @@ import {
   postAiChatStreamAPI,
   postAiAnalyzeImageAPI,
   postAiAnalyzeImageStreamAPI,
+  postOutfitRecommendStreamAPI,
 } from '@/services/ai'
 
 const emit = defineEmits<{
@@ -23,6 +24,8 @@ interface ChatMessage {
   thinking?: string
   /** UI状态：思考过程是否展开 */
   _thinkingExpanded?: boolean
+  /** 穿搭推荐图片 */
+  images?: string[]
 }
 
 // 消息列表
@@ -32,6 +35,18 @@ const isLoading = ref(false)
 const scrollToId = ref('')
 const pendingImage = ref('')
 let msgId = 0
+
+// 穿搭推荐弹窗
+const showOutfitPopup = ref(false)
+const outfitDescription = ref('')
+
+// 确认穿搭推荐
+const confirmOutfit = () => {
+  if (!outfitDescription.value.trim()) return
+  showOutfitPopup.value = false
+  sendOutfitMessage(outfitDescription.value.trim())
+  outfitDescription.value = ''
+}
 
 // 快捷入口
 const quickActions = [
@@ -164,6 +179,90 @@ const sendImageMessage = async (question: string) => {
   // #ifndef H5
   await normalImageChat(image, question)
   // #endif
+}
+
+// 发送穿搭推荐消息
+const sendOutfitMessage = async (description: string) => {
+  // 添加用户消息
+  messages.value.push({ id: ++msgId, role: 'user', content: `穿搭推荐：${description}` })
+  scrollToBottom()
+
+  isLoading.value = true
+
+  // #ifdef H5
+  const aiMsgId = ++msgId
+  messages.value.push({
+    id: aiMsgId,
+    role: 'assistant',
+    content: '',
+    streaming: true,
+    images: [],
+  })
+  scrollToBottom()
+
+  postOutfitRecommendStreamAPI(
+    { description },
+    {
+      onChunk(fullText) {
+        const msg = messages.value.find((m) => m.id === aiMsgId)
+        if (msg) {
+          msg.content = fullText
+          scrollToBottom()
+        }
+      },
+      onImages(urls) {
+        const msg = messages.value.find((m) => m.id === aiMsgId)
+        if (msg) {
+          msg.images = urls
+          scrollToBottom()
+        }
+      },
+      onDone() {
+        const msg = messages.value.find((m) => m.id === aiMsgId)
+        if (msg) msg.streaming = false
+        isLoading.value = false
+      },
+      onError() {
+        const msg = messages.value.find((m) => m.id === aiMsgId)
+        if (msg) {
+          msg.content = '抱歉，穿搭推荐暂时不可用～'
+          msg.streaming = false
+        }
+        isLoading.value = false
+      },
+    },
+  )
+  // #endif
+
+  // #ifndef H5
+  try {
+    const res = await postAiChatAPI({
+      message: `请为我推荐穿搭：${description}`,
+      history: [],
+    })
+    messages.value.push({
+      id: ++msgId,
+      role: 'assistant',
+      content: res.result.reply,
+    })
+  } catch {
+    messages.value.push({
+      id: ++msgId,
+      role: 'assistant',
+      content: '抱歉，穿搭推荐暂时不可用～',
+    })
+  } finally {
+    isLoading.value = false
+  }
+  // #endif
+}
+
+// 预览穿搭图片
+const previewOutfitImage = (urls: string[], current: number) => {
+  uni.previewImage({
+    urls,
+    current,
+  })
 }
 
 // SSE 流式聊天（H5）
@@ -309,7 +408,9 @@ const normalImageChat = async (image: string, message: string) => {
 
 // 点击快捷入口
 const onQuickAction = (action: typeof quickActions[0]) => {
-  if (action.message) {
+  if (action.text === '穿搭推荐') {
+    showOutfitPopup.value = true
+  } else if (action.message) {
     sendMessage(action.message)
   } else {
     chooseImage()
@@ -397,6 +498,18 @@ const onGoodsClick = (goods: { id: string }) => {
             <text v-if="msg.streaming" class="cursor">▊</text>
           </view>
 
+          <!-- 穿搭推荐图片 -->
+          <view v-if="msg.images && msg.images.length" class="outfit-images">
+            <image
+              v-for="(img, idx) in msg.images"
+              :key="idx"
+              class="outfit-image"
+              :src="img"
+              mode="aspectFill"
+              @tap="previewOutfitImage(msg.images!, idx)"
+            />
+          </view>
+
           <!-- 商品卡片 -->
           <view v-if="msg.goods && msg.goods.length" class="goods-scroll">
             <scroll-view scroll-x class="goods-list">
@@ -424,6 +537,24 @@ const onGoodsClick = (goods: { id: string }) => {
           </view>
         </view>
       </scroll-view>
+
+      <!-- 穿搭推荐输入弹窗 -->
+      <view class="outfit-popup-mask" v-if="showOutfitPopup" @tap="showOutfitPopup = false">
+        <view class="outfit-popup" @tap.stop>
+          <view class="outfit-popup-title">描述你想要的穿搭</view>
+          <input
+            class="outfit-popup-input"
+            v-model="outfitDescription"
+            placeholder="如：适合约会的春季穿搭"
+            confirm-type="send"
+            @confirm="confirmOutfit"
+          />
+          <view class="outfit-popup-actions">
+            <view class="outfit-popup-btn" @tap="showOutfitPopup = false">取消</view>
+            <view class="outfit-popup-btn primary" @tap="confirmOutfit">生成推荐</view>
+          </view>
+        </view>
+      </view>
 
       <!-- 待发送图片预览 -->
       <view v-if="pendingImage" class="pending-image-bar">
@@ -797,5 +928,82 @@ const onGoodsClick = (goods: { id: string }) => {
       background: #27ba9b;
     }
   }
+}
+
+// 穿搭推荐输入弹窗
+.outfit-popup-mask {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.outfit-popup {
+  width: 600rpx;
+  background-color: #fff;
+  border-radius: 20rpx;
+  padding: 40rpx;
+}
+
+.outfit-popup-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 30rpx;
+}
+
+.outfit-popup-input {
+  width: 100%;
+  height: 80rpx;
+  border: 1rpx solid #ddd;
+  border-radius: 12rpx;
+  padding: 0 20rpx;
+  font-size: 28rpx;
+  box-sizing: border-box;
+}
+
+.outfit-popup-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 30rpx;
+  gap: 20rpx;
+}
+
+.outfit-popup-btn {
+  flex: 1;
+  height: 72rpx;
+  line-height: 72rpx;
+  text-align: center;
+  border-radius: 72rpx;
+  border: 1rpx solid #ddd;
+  font-size: 28rpx;
+  color: #666;
+
+  &.primary {
+    color: #fff;
+    background-color: #27ba9b;
+    border-color: #27ba9b;
+  }
+}
+
+// 穿搭图片网格
+.outfit-images {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+  margin-top: 16rpx;
+}
+
+.outfit-image {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12rpx;
+  background-color: #f5f5f5;
 }
 </style>

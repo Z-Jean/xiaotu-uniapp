@@ -19,6 +19,7 @@ module.exports = {
     UniHelper: true,
     Page: true,
     AnyObject: true,
+    plus: true,
   },
   parserOptions: {
     ecmaVersion: 'latest',
