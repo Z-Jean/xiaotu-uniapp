@@ -379,7 +379,6 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     let buffer = ''
     let fullReply = ''
     let inThinking = false
-    let thinkingContent = ''
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -400,42 +399,42 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
           const chunk = JSON.parse(jsonStr)
           const delta = chunk.choices?.[0]?.delta?.content
           if (delta) {
-            fullReply += delta
-
-            // 解析 think 标签
-            if (delta.includes('<think>')) {
-              inThinking = true
-              const afterTag = delta.split('<think>')[1] || ''
-              if (afterTag) {
-                thinkingContent += afterTag
-                sendEvent({ type: 'thinking', text: afterTag })
-              }
-              continue
-            }
-
-            if (inThinking) {
-              if (delta.includes('</think>')) {
-                inThinking = false
-                const beforeClose = delta.split('</think>')[0] || ''
-                if (beforeClose) {
-                  thinkingContent += beforeClose
-                  sendEvent({ type: 'thinking', text: beforeClose })
+            // 分段处理 think 标签
+            let remaining = delta
+            while (remaining.length > 0) {
+              if (inThinking) {
+                const closeIdx = remaining.indexOf('</think>')
+                if (closeIdx === -1) {
+                  // 整段都在 think 内
+                  sendEvent({ type: 'thinking', text: remaining })
+                  remaining = ''
+                } else {
+                  // 找到关闭标签
+                  if (closeIdx > 0) {
+                    sendEvent({ type: 'thinking', text: remaining.slice(0, closeIdx) })
+                  }
+                  inThinking = false
+                  remaining = remaining.slice(closeIdx + 8) // 8 = '</think>'.length
                 }
-                // <think> 之后的内容是正式回答
-                const afterClose = delta.split('</think>')[1] || ''
-                if (afterClose) {
-                  sendEvent({ type: 'chunk', text: afterClose })
+              } else {
+                const openIdx = remaining.indexOf('<think>')
+                if (openIdx === -1) {
+                  // 没有 think 标签，全部是正式内容
+                  fullReply += remaining
+                  sendEvent({ type: 'chunk', text: remaining })
+                  remaining = ''
+                } else {
+                  // 找到开始标签
+                  if (openIdx > 0) {
+                    const before = remaining.slice(0, openIdx)
+                    fullReply += before
+                    sendEvent({ type: 'chunk', text: before })
+                  }
+                  inThinking = true
+                  remaining = remaining.slice(openIdx + 7) // 7 = '<think>'.length
                 }
-                continue
               }
-              // 还在 think 标签内
-              thinkingContent += delta
-              sendEvent({ type: 'thinking', text: delta })
-              continue
             }
-
-            // 不在 think 标签内，正常推送
-            sendEvent({ type: 'chunk', text: delta })
           }
         } catch {
           // skip malformed JSON
