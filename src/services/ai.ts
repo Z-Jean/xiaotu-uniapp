@@ -22,6 +22,10 @@ export interface StreamCallbacks {
   ) => void
   onDone: () => void
   onError: (err: Error) => void
+  /** 深度思考内容（可选） */
+  onThinking?: (text: string) => void
+  /** 穿搭推荐图片 URLs（可选） */
+  onImages?: (urls: string[]) => void
 }
 
 /** AI 聊天（SSE 流式）- 仅 H5 支持 */
@@ -73,7 +77,9 @@ export const postAiChatStreamAPI = (
             if (!jsonStr || jsonStr === '[DONE]') continue
             try {
               const evt = JSON.parse(jsonStr)
-              if (evt.type === 'chunk') {
+              if (evt.type === 'thinking') {
+                callbacks.onThinking?.(evt.text || '')
+              } else if (evt.type === 'chunk') {
                 fullReply += evt.text
                 callbacks.onChunk(fullReply)
               } else if (evt.type === 'goods') {
@@ -165,6 +171,78 @@ export const postAiAnalyzeImageStreamAPI = (
               if (evt.type === 'chunk') {
                 fullReply += evt.text
                 callbacks.onChunk(fullReply)
+              } else if (evt.type === 'done') {
+                callbacks.onDone()
+              } else if (evt.type === 'error') {
+                callbacks.onError(new Error(evt.message))
+              }
+            } catch {
+              // skip malformed JSON
+            }
+          }
+        }
+      }
+      callbacks.onDone()
+    })
+    .catch((err) => {
+      if (err.name !== 'AbortError') {
+        callbacks.onError(err)
+      }
+    })
+
+  return controller
+}
+
+/** 穿搭推荐（SSE 流式）- 仅 H5 支持 */
+export const postOutfitRecommendStreamAPI = (
+  data: { description: string },
+  callbacks: StreamCallbacks,
+) => {
+  const token = uni.getStorageSync('member_profile')
+    ? JSON.parse(uni.getStorageSync('member_profile'))?.token
+    : ''
+
+  const controller = new AbortController()
+
+  fetch(`${baseURL}/ai/outfit-recommend/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: token } : {}),
+    },
+    body: JSON.stringify(data),
+    signal: controller.signal,
+  })
+    .then(async (resp) => {
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`)
+      }
+      const reader = resp.body?.getReader()
+      if (!reader) throw new Error('ReadableStream not supported')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullReply = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const jsonStr = line.slice(6).trim()
+            if (!jsonStr || jsonStr === '[DONE]') continue
+            try {
+              const evt = JSON.parse(jsonStr)
+              if (evt.type === 'chunk') {
+                fullReply += evt.text
+                callbacks.onChunk(fullReply)
+              } else if (evt.type === 'image') {
+                callbacks.onImages?.(evt.urls || [])
               } else if (evt.type === 'done') {
                 callbacks.onDone()
               } else if (evt.type === 'error') {
