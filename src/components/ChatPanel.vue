@@ -19,6 +19,10 @@ interface ChatMessage {
   image?: string
   goods?: Array<{ id: string; name: string; price: number; picture: string }>
   streaming?: boolean
+  /** 深度思考过程 */
+  thinking?: string
+  /** UI状态：思考过程是否展开 */
+  _thinkingExpanded?: boolean
 }
 
 // 消息列表
@@ -32,7 +36,8 @@ let msgId = 0
 // 快捷入口
 const quickActions = [
   { icon: '🛍️', text: '今日好物推荐', message: '推荐一些今日好物' },
-  { icon: '👗', text: '穿搭推荐', message: '给我推荐一些穿搭' },
+  { icon: '🧠', text: '深度思考', message: '帮我分析一下当前平台有什么值得买的商品' },
+  { icon: '👗', text: '穿搭推荐', message: '' },
   { icon: '🏠', text: '家居好物', message: '推荐一些好用的家居产品' },
   { icon: '📸', text: '图片分析', message: '' },
 ]
@@ -162,10 +167,7 @@ const sendImageMessage = async (question: string) => {
 }
 
 // SSE 流式聊天（H5）
-const streamChat = async (
-  content: string,
-  history: Array<{ role: string; content: string }>,
-) => {
+const streamChat = async (content: string, history: Array<{ role: string; content: string }>) => {
   const aiMsgId = ++msgId
   messages.value.push({
     id: aiMsgId,
@@ -178,6 +180,12 @@ const streamChat = async (
   postAiChatStreamAPI(
     { message: content, history, sessionId: 'default' },
     {
+      onThinking(text) {
+        const msg = messages.value.find((m) => m.id === aiMsgId)
+        if (msg) {
+          msg.thinking = (msg.thinking || '') + text
+        }
+      },
       onChunk(fullText) {
         const msg = messages.value.find((m) => m.id === aiMsgId)
         if (msg) {
@@ -214,10 +222,7 @@ const streamChat = async (
 }
 
 // 普通聊天（小程序/App）
-const normalChat = async (
-  content: string,
-  history: Array<{ role: string; content: string }>,
-) => {
+const normalChat = async (content: string, history: Array<{ role: string; content: string }>) => {
   try {
     const res = await postAiChatAPI({ message: content, history })
     messages.value.push({
@@ -303,7 +308,7 @@ const normalImageChat = async (image: string, message: string) => {
 }
 
 // 点击快捷入口
-const onQuickAction = (action: (typeof quickActions)[0]) => {
+const onQuickAction = (action: typeof quickActions[0]) => {
   if (action.message) {
     sendMessage(action.message)
   } else {
@@ -365,6 +370,20 @@ const onGoodsClick = (goods: { id: string }) => {
             class="msg-avatar"
             src="/static/lottie/assistant.png"
           />
+          <!-- 深度思考折叠 -->
+          <view v-if="msg.thinking" class="thinking-block">
+            <view class="thinking-toggle" @tap="msg._thinkingExpanded = !msg._thinkingExpanded">
+              <text class="thinking-icon">💡</text>
+              <text class="thinking-label">
+                查看思考过程（{{ msg.thinking.split('\n').filter((s: string) => s.trim()).length }}
+                步）
+              </text>
+              <text class="thinking-arrow">{{ msg._thinkingExpanded ? '▲' : '▼' }}</text>
+            </view>
+            <view v-if="msg._thinkingExpanded" class="thinking-content">
+              {{ msg.thinking }}
+            </view>
+          </view>
           <view class="bubble" :class="[msg.role, { streaming: msg.streaming }]">
             <!-- 图片消息 -->
             <image
@@ -387,11 +406,7 @@ const onGoodsClick = (goods: { id: string }) => {
                 class="goods-card"
                 @tap="onGoodsClick(goods)"
               >
-                <image
-                  class="goods-img"
-                  :src="goods.picture"
-                  mode="aspectFill"
-                />
+                <image class="goods-img" :src="goods.picture" mode="aspectFill" />
                 <text class="goods-name">{{ goods.name }}</text>
                 <text class="goods-price">¥{{ goods.price }}</text>
               </view>
@@ -400,10 +415,7 @@ const onGoodsClick = (goods: { id: string }) => {
         </view>
 
         <!-- 加载中 -->
-        <view
-          v-if="isLoading && !messages.some((m) => m.streaming)"
-          class="message-item assistant"
-        >
+        <view v-if="isLoading && !messages.some((m) => m.streaming)" class="message-item assistant">
           <image class="msg-avatar" src="/static/lottie/assistant.png" />
           <view class="bubble assistant loading">
             <text class="dot">·</text>
@@ -702,6 +714,49 @@ const onGoodsClick = (goods: { id: string }) => {
     color: #999;
     padding: 8rpx;
   }
+}
+
+// 深度思考折叠
+.thinking-block {
+  margin-bottom: 16rpx;
+  border-radius: 12rpx;
+  overflow: hidden;
+}
+
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 20rpx;
+  background-color: #f0f7ff;
+  border-radius: 12rpx;
+  gap: 8rpx;
+}
+
+.thinking-icon {
+  font-size: 28rpx;
+}
+
+.thinking-label {
+  flex: 1;
+  font-size: 24rpx;
+  color: #6b8eb5;
+}
+
+.thinking-arrow {
+  font-size: 22rpx;
+  color: #6b8eb5;
+}
+
+.thinking-content {
+  padding: 20rpx;
+  background-color: #f8f9fa;
+  border-radius: 0 0 12rpx 12rpx;
+  font-size: 24rpx;
+  color: #666;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  max-height: 400rpx;
+  overflow-y: auto;
 }
 
 .input-bar {
