@@ -9,6 +9,10 @@ import { z } from 'zod'
 
 const router = Router()
 
+// ─── Dashscope 通义万相配置 ──────────────────────────────────
+const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY || ''
+const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1'
+
 // ─── 自定义 MiMo ChatModel ─────────────────────────────────
 class MiMoChatModel extends BaseChatModel {
   apiKey: string
@@ -646,6 +650,215 @@ router.post('/analyze-image/stream', async (req: Request, res: Response) => {
         res.write(`data: ${JSON.stringify(data)}\n\n`)
       }
       sendEvent({ type: 'error', message: '图片分析失败' })
+      sendEvent({ type: 'done' })
+      res.end()
+    } catch {
+      res.end()
+    }
+  }
+})
+
+// ─── 穿搭推荐（通义万相文生图）──────────────────────────────
+
+/** 提交文生图异步任务 */
+async function submitTextToImage(prompt: string, n = 4): Promise<string | null> {
+  if (!DASHSCOPE_API_KEY) return null
+
+  try {
+    const resp = await fetch(`${DASHSCOPE_BASE_URL}/services/aigc/text2image/image-synthesis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
+        'X-DashScope-Async': 'enable',
+      },
+      body: JSON.stringify({
+        model: 'wanx-v1',
+        input: { prompt },
+        parameters: { n, size: '1024*1024' },
+      }),
+    })
+    const data = (await resp.json()) as any
+    return data?.output?.task_id || null
+  } catch (err) {
+    console.error('提交文生图任务失败:', err)
+    return null
+  }
+}
+
+/** 轮询文生图任务结果 */
+async function pollImageTask(
+  taskId: string,
+  maxRetries = 30,
+  intervalMs = 2000,
+): Promise<string[]> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const resp = await fetch(`${DASHSCOPE_BASE_URL}/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${DASHSCOPE_API_KEY}` },
+      })
+      const data = (await resp.json()) as any
+      const status = data?.output?.task_status
+
+      if (status === 'SUCCEEDED') {
+        return data.output.results?.map((r: any) => r.url) || []
+      }
+      if (status === 'FAILED') {
+        console.error('文生图任务失败:', data?.output)
+        return []
+      }
+      // PENDING / RUNNING，继续轮询
+    } catch {
+      // 网络抖动，继续重试
+    }
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+  return []
+}
+
+/** POST /ai/outfit-recommend */
+router.post('/outfit-recommend', async (req: Request, res: Response) => {
+  try {
+    const { description } = req.body
+    if (!description) {
+      res.json({ code: '0', msg: '请输入穿搭描述', result: null })
+      return
+    }
+
+    // 构造英文 prompt（通义万相对英文 prompt 效果更好）
+    const prompt = `fashion outfit recommendation, ${description}, model wearing clothes, studio lighting, high quality fashion photography, full body shot`
+
+    // 先用 LLM 生成穿搭文案
+    const llm = new MiMoChatModel()
+    const styleResponse = await llm.invoke([
+      new SystemMessage('你是穿搭顾问，根据用户需求给出简短的穿搭建议，50字以内，用中文。'),
+      new HumanMessage(description),
+    ])
+    const reply =
+      typeof styleResponse.content === 'string'
+        ? styleResponse.content
+        : `为您推荐以下${description}穿搭方案`
+
+    // 提交文生图任务
+    const taskId = await submitTextToImage(prompt, 4)
+    if (!taskId) {
+      res.json({
+        code: '1',
+        msg: '操作成功',
+        result: { images: [], reply },
+      })
+      return
+    }
+
+    // 轮询获取图片
+    const images = await pollImageTask(taskId)
+
+    res.json({
+      code: '1',
+      msg: '操作成功',
+      result: { images, reply },
+    })
+  } catch (err) {
+    console.error('穿搭推荐失败:', err)
+    res.json({ code: '0', msg: '穿搭推荐失败', result: null })
+  }
+})
+
+/** POST /ai/outfit-recommend/stream */
+router.post('/outfit-recommend/stream', async (req: Request, res: Response) => {
+  try {
+    const { description } = req.body
+    if (!description) {
+      res.json({ code: '0', msg: '请输入穿搭描述', result: null })
+      return
+    }
+
+    // 设置 SSE 响应头
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+
+    const sendEvent = (data: any) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`)
+    }
+
+    // 1. 用 LLM 生成穿搭文案（流式）
+    const prompt = `fashion outfit recommendation, ${description}, model wearing clothes, studio lighting, high quality fashion photography, full body shot`
+
+    const mimoResponse = await fetch('https://api.xiaomimimo.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.MIMO_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'mimo-v2.5',
+        messages: [
+          {
+            role: 'system',
+            content: '你是穿搭顾问，根据用户需求给出简短的穿搭建议，50字以内，用中文。',
+          },
+          { role: 'user', content: description },
+        ],
+        max_tokens: 200,
+        temperature: 0.7,
+        stream: true,
+      }),
+    })
+
+    let fullReply = ''
+    if (mimoResponse.ok) {
+      const reader = mimoResponse.body?.getReader()
+      if (reader) {
+        const decoder = new TextDecoder()
+        let buffer = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || !trimmed.startsWith('data:')) continue
+            const jsonStr = trimmed.slice(5).trim()
+            if (jsonStr === '[DONE]') continue
+            try {
+              const chunk = JSON.parse(jsonStr)
+              const delta = chunk.choices?.[0]?.delta?.content
+              if (delta) {
+                fullReply += delta
+                sendEvent({ type: 'chunk', text: delta })
+              }
+            } catch {
+              // skip
+            }
+          }
+        }
+      }
+    }
+
+    // 2. 提交文生图任务
+    const taskId = await submitTextToImage(prompt, 4)
+    if (taskId) {
+      // 3. 轮询图片结果
+      const images = await pollImageTask(taskId)
+      if (images.length) {
+        sendEvent({ type: 'image', urls: images })
+      }
+    }
+
+    // 4. 完成
+    sendEvent({ type: 'done' })
+    res.end()
+  } catch (err: any) {
+    console.error('穿搭推荐流式失败:', err)
+    try {
+      const sendEvent = (data: any) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`)
+      }
+      sendEvent({ type: 'error', message: '穿搭推荐暂时不可用' })
       sendEvent({ type: 'done' })
       res.end()
     } catch {
