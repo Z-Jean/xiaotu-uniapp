@@ -66,15 +66,21 @@ class MiMoChatModel extends BaseChatModel {
   }
 }
 
-const SYSTEM_PROMPT = `你是小兔鲜儿的AI购物助手"小兔"🐰，性格活泼可爱，喜欢用emoji表情。
-你的职责：
-1. 根据用户需求推荐平台上的商品
-2. 提供穿搭建议、家居好物推荐
-3. 回答购物相关问题
-规则：
-- 只推荐平台上的商品，不编造不存在的商品
-- 回复简洁友好，适合手机阅读，控制在100字以内
-- 如果没有匹配的商品，告诉用户暂时没有相关推荐`
+const SYSTEM_PROMPT = [
+  '你是小兔鲜儿的AI购物助手"小兔"\u{1F430}，性格活泼可爱，喜欢用emoji表情。',
+  '你的职责：',
+  '1. 根据用户需求推荐平台上的商品',
+  '2. 提供穿搭建议、家居好物推荐',
+  '3. 回答购物相关问题',
+  '规则：',
+  '- 只推荐平台上的商品，不编造不存在的商品',
+  '- 回复简洁友好，适合手机阅读，控制在100字以内',
+  '- 如果没有匹配的商品，告诉用户暂时没有相关推荐',
+  '',
+  '当你需要分析、推理、比较或做复杂判断时，使用<think>标签展示你的思考过程。',
+  '格式：<think>你的逐步推理过程...</think>最终给用户的回答',
+  '不需要深度思考的简单问题可以跳过<think>标签，直接回答。',
+].join('\n')
 
 // ─── LangChain Tools ───────────────────────────────────────
 
@@ -372,6 +378,8 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     const decoder = new TextDecoder()
     let buffer = ''
     let fullReply = ''
+    let inThinking = false
+    let thinkingContent = ''
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -393,6 +401,40 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
           const delta = chunk.choices?.[0]?.delta?.content
           if (delta) {
             fullReply += delta
+
+            // 解析 think 标签
+            if (delta.includes('<think>')) {
+              inThinking = true
+              const afterTag = delta.split('<think>')[1] || ''
+              if (afterTag) {
+                thinkingContent += afterTag
+                sendEvent({ type: 'thinking', text: afterTag })
+              }
+              continue
+            }
+
+            if (inThinking) {
+              if (delta.includes('</think>')) {
+                inThinking = false
+                const beforeClose = delta.split('</think>')[0] || ''
+                if (beforeClose) {
+                  thinkingContent += beforeClose
+                  sendEvent({ type: 'thinking', text: beforeClose })
+                }
+                // <think> 之后的内容是正式回答
+                const afterClose = delta.split('</think>')[1] || ''
+                if (afterClose) {
+                  sendEvent({ type: 'chunk', text: afterClose })
+                }
+                continue
+              }
+              // 还在 think 标签内
+              thinkingContent += delta
+              sendEvent({ type: 'thinking', text: delta })
+              continue
+            }
+
+            // 不在 think 标签内，正常推送
             sendEvent({ type: 'chunk', text: delta })
           }
         } catch {
@@ -425,12 +467,12 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
 
 // ─── 图片分析 ───────────────────────────────────────────────
 
-const IMAGE_ANALYSIS_PROMPT = `你是小兔鲜儿的AI购物助手"小兔"🐰，擅长图片分析。
+const IMAGE_ANALYSIS_PROMPT = `你是小兔鲜儿的AI购物助手"小兔"\u{1F430}，擅长图片分析。
 请从以下角度分析用户上传的图片：
-1. 🎨 美学分析：构图、色彩搭配、光影效果
-2. 📝 内容描述：图片中的主要元素和场景
-3. 💡 实用建议：如果是商品图，给出搭配/使用建议
-4. 🛍️ 相关推荐：如果能识别出商品类型，推荐平台上的类似商品
+1. \u{1F3A8} 美学分析：构图、色彩搭配、光影效果
+2. \u{1F4DD} 内容描述：图片中的主要元素和场景
+3. \u{1F4A1} 实用建议：如果是商品图，给出搭配/使用建议
+4. \u{1F6CD}️ 相关推荐：如果能识别出商品类型，推荐平台上的类似商品
 规则：
 - 回复简洁友好，适合手机阅读，控制在200字以内
 - 用 emoji 分段，增强可读性
