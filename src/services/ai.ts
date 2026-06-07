@@ -95,7 +95,6 @@ export const postAiChatStreamAPI = (
           }
         }
       }
-      callbacks.onDone()
     })
     .catch((err) => {
       if (err.name !== 'AbortError') {
@@ -182,7 +181,6 @@ export const postAiAnalyzeImageStreamAPI = (
           }
         }
       }
-      callbacks.onDone()
     })
     .catch((err) => {
       if (err.name !== 'AbortError') {
@@ -254,7 +252,6 @@ export const postOutfitRecommendStreamAPI = (
           }
         }
       }
-      callbacks.onDone()
     })
     .catch((err) => {
       if (err.name !== 'AbortError') {

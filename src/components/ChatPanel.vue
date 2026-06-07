@@ -257,6 +257,14 @@ const sendOutfitMessage = async (description: string) => {
   // #endif
 }
 
+// 预览图片
+const previewImage = (url: string) => {
+  uni.previewImage({
+    urls: [url],
+    current: url,
+  })
+}
+
 // 预览穿搭图片
 const previewOutfitImage = (urls: string[], current: number) => {
   uni.previewImage({
