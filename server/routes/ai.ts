@@ -304,7 +304,7 @@ router.post('/chat', async (req: Request, res: Response) => {
 
 router.post('/chat/stream', async (req: Request, res: Response) => {
   try {
-    const { message, history: clientHistory = [], sessionId = 'default' } = req.body
+    const { message, history: clientHistory = [], sessionId = 'default', thinking = false } = req.body
     if (!message) {
       res.json({ code: '0', msg: '请输入消息', result: null })
       return
@@ -342,21 +342,32 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
       { role: 'user', content: message },
     ]
 
-    // 5. 流式调用 MiMo API（直接 fetch，不走 LangChain，支持 stream）
-    const mimoResponse = await fetch('https://api.xiaomimimo.com/v1/chat/completions', {
+    // 5. 流式调用 LLM API
+    //    深度思考模式 → QwQ（Dashscope，会输出 <think> 标签）
+    //    普通模式 → MiMo
+    const isThinkingMode = thinking && DASHSCOPE_API_KEY
+    const apiUrl = isThinkingMode
+      ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+      : 'https://api.xiaomimimo.com/v1/chat/completions'
+    const apiToken = isThinkingMode
+      ? DASHSCOPE_API_KEY
+      : process.env.MIMO_API_KEY
+    const model = isThinkingMode ? 'qwq-plus' : 'mimo-v2.5'
+
+    const mimoResponse = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.MIMO_API_KEY}`,
+        Authorization: `Bearer ${apiToken}`,
       },
       body: JSON.stringify({
-        model: 'mimo-v2.5',
+        model,
         messages: messages.map((m) => ({
           role: m.role,
           content: m.content,
         })),
-        max_tokens: 800,
-        temperature: 0.7,
+        max_tokens: isThinkingMode ? 2000 : 800,
+        temperature: isThinkingMode ? 0.6 : 0.7,
         stream: true,
       }),
     })

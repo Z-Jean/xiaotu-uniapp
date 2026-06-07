@@ -143,7 +143,7 @@ const sendMessage = async (text?: string) => {
   isLoading.value = true
 
   // #ifdef H5
-  await streamChat(content, history)
+  await streamChat(content, history, chatMode.value === 'thinking')
   // #endif
 
   // #ifndef H5
@@ -270,7 +270,7 @@ const previewOutfitImage = (urls: string[], current: number) => {
 }
 
 // SSE 流式聊天（H5）
-const streamChat = async (content: string, history: Array<{ role: string; content: string }>) => {
+const streamChat = async (content: string, history: Array<{ role: string; content: string }>, thinking = false) => {
   const aiMsgId = ++msgId
   messages.value.push({
     id: aiMsgId,
@@ -281,7 +281,7 @@ const streamChat = async (content: string, history: Array<{ role: string; conten
   scrollToBottom()
 
   postAiChatStreamAPI(
-    { message: content, history, sessionId: 'default' },
+    { message: content, history, sessionId: 'default', thinking },
     {
       onThinking(text) {
         const msg = messages.value.find((m) => m.id === aiMsgId)
