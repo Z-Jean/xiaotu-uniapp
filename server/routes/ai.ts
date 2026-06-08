@@ -84,17 +84,21 @@ const SYSTEM_PROMPT = [
 ].join('\n')
 
 // 深度思考模式的 system prompt（QwQ 推理模型专用）
+// QwQ 不一定输出 <think> 标签，所以用分隔符来区分思考和回答
 const THINKING_SYSTEM_PROMPT = [
   '你是小兔鲜儿的AI购物助手"小兔"🐰。',
   '',
-  '【重要】你必须严格按照以下格式回复：',
-  '<think>',
-  '在这里写你的思考过程，包括分析、推理、比较等步骤',
-  '你可以分多步思考，每步一行',
-  '</think>',
-  '在这里写最终给用户的回答（简洁友好，100字以内）',
+  '请按以下格式回复：',
+  '第一部分：你的思考过程（分析、推理、比较），每步一行，用数字编号',
+  '然后写一行固定的分隔符：===ANSWER===',
+  '第二部分：最终给用户的回答（简洁友好，100字以内）',
   '',
-  '不要跳过<think>标签，每次回复都必须先思考再回答。',
+  '示例格式：',
+  '1. 分析用户需求：用户想要春季穿搭建议',
+  '2. 考虑因素：天气转暖、场合、流行趋势',
+  '3. 匹配商品：平台上有T恤、衬衫、连衣裙等',
+  '===ANSWER===',
+  '推荐春季穿搭：轻薄针织衫+碎花裙，清新又温柔～',
 ].join('\n')
 
 // ─── LangChain Tools ───────────────────────────────────────
@@ -407,7 +411,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     const decoder = new TextDecoder()
     let buffer = ''
     let fullReply = ''
-    let inThinking = false
+    let inThinking = true // 一开始是思考阶段，遇到 ===ANSWER=== 后切换
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -428,41 +432,30 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
           const chunk = JSON.parse(jsonStr)
           const delta = chunk.choices?.[0]?.delta?.content
           if (delta) {
-            // 分段处理 think 标签
-            if (delta.includes('<think>')) console.log('[chat/stream] found <think> tag!')
-            let remaining = delta
-            while (remaining.length > 0) {
-              if (inThinking) {
-                const closeIdx = remaining.indexOf('</think>')
-                if (closeIdx === -1) {
-                  // 整段都在 think 内
-                  sendEvent({ type: 'thinking', text: remaining })
-                  remaining = ''
-                } else {
-                  // 找到关闭标签
-                  if (closeIdx > 0) {
-                    sendEvent({ type: 'thinking', text: remaining.slice(0, closeIdx) })
-                  }
-                  inThinking = false
-                  remaining = remaining.slice(closeIdx + 8) // 8 = '</think>'.length
-                }
-              } else {
-                const openIdx = remaining.indexOf('<think>')
-                if (openIdx === -1) {
-                  // 没有 think 标签，全部是正式内容
-                  fullReply += remaining
-                  sendEvent({ type: 'chunk', text: remaining })
-                  remaining = ''
-                } else {
-                  // 找到开始标签
-                  if (openIdx > 0) {
-                    const before = remaining.slice(0, openIdx)
-                    fullReply += before
-                    sendEvent({ type: 'chunk', text: before })
-                  }
-                  inThinking = true
-                  remaining = remaining.slice(openIdx + 7) // 7 = '<think>'.length
-                }
+            // 用 ===ANSWER=== 分隔符区分思考和回答
+            const SEPARATOR = '===ANSWER==='
+
+            // 已经过了分隔符，直接作为回答
+            if (!inThinking) {
+              fullReply += delta
+              sendEvent({ type: 'chunk', text: delta })
+              continue
+            }
+
+            // 还在思考阶段，检查是否包含分隔符
+            const sepIdx = delta.indexOf(SEPARATOR)
+            if (sepIdx === -1) {
+              // 没有分隔符，整段都是思考
+              sendEvent({ type: 'thinking', text: delta })
+            } else {
+              // 找到分隔符：分隔符前是思考，后面是回答
+              const beforeSep = delta.slice(0, sepIdx)
+              if (beforeSep) sendEvent({ type: 'thinking', text: beforeSep })
+              inThinking = false
+              const afterSep = delta.slice(sepIdx + SEPARATOR.length)
+              if (afterSep) {
+                fullReply += afterSep
+                sendEvent({ type: 'chunk', text: afterSep })
               }
             }
           }
