@@ -869,6 +869,7 @@ router.post('/outfit-recommend/stream', async (req: Request, res: Response) => {
       // 3. 轮询图片结果
       const images = await pollImageTask(taskId)
       if (images.length) {
+        console.log('[outfit-stream] sending image event:', images.length, 'urls')
         sendEvent({ type: 'image', urls: images })
       }
     }
