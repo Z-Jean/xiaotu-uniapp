@@ -13,8 +13,9 @@ import type { LogisticItem, OrderResult } from '@/types/order'
 import { onLoad, onReady, onReachBottom } from '@dcloudio/uni-app'
 import { ref } from 'vue'
 import PageSkeleton from './components/PageSkeleton.vue'
-import { getPayMockAPI, getPayWxPayMiniPayAPI } from '@/services/pay'
+import { getPayMockAPI, getPayWxPayMiniPayAPI, getPayAlipayAPI } from '@/services/pay'
 import LogisticsMap from '@/components/LogisticsMap.vue'
+import PayModePopup from '@/pagesOrder/payment/PayModePopup.vue'
 
 // 获取屏幕边界到安全区域距离
 const { safeAreaInsets } = uni.getSystemInfoSync()
@@ -94,22 +95,30 @@ onReady(() => {
 // 获取订单详情
 const order = ref<OrderResult>()
 const getMemberOrderByIdData = async () => {
-  const res = await getMemberOrderByIdAPI(query.id)
-  order.value = res.result
-  if (
-    [OrderState.DaiShouHuo, OrderState.DaiPingJia, OrderState.YiWanCheng].includes(
-      order.value.orderState,
-    )
-  ) {
-    getMemberOrderLogisticsByIdData()
+  try {
+    const res = await getMemberOrderByIdAPI(query.id)
+    order.value = res.result
+    if (
+      [OrderState.DaiShouHuo, OrderState.DaiPingJia, OrderState.YiWanCheng].includes(
+        order.value.orderState,
+      )
+    ) {
+      getMemberOrderLogisticsByIdData()
+    }
+  } catch {
+    uni.showToast({ icon: 'none', title: '加载订单失败' })
   }
 }
 
 // 获取物流信息
 const logisticList = ref<LogisticItem[]>([])
 const getMemberOrderLogisticsByIdData = async () => {
-  const res = await getMemberOrderLogisticsByIdAPI(query.id)
-  logisticList.value = res.result.list
+  try {
+    const res = await getMemberOrderLogisticsByIdAPI(query.id)
+    logisticList.value = res.result.list
+  } catch {
+    // 物流信息加载失败不阻塞页面
+  }
 }
 
 onLoad(() => {
@@ -122,29 +131,67 @@ const onTimeup = () => {
   order.value!.orderState = OrderState.YiQuXiao
 }
 
-// 订单支付
-const onOrderPay = async () => {
-  if (import.meta.env.DEV) {
-    // 开发环境模拟支付
-    await getPayMockAPI({ orderId: query.id })
-  } else {
-    // #ifdef MP-WEIXIN
+// 支付方式弹窗
+const payModeVisible = ref(false)
+const isPaying = ref(false)
 
-    // 正式环境支付：1.获取支付订单信息，2.调用微信支付API
-    // const res = await getPayWxPayMiniPayAPI({ orderId: query.id })
-    // await wx.requestPayment(res.result)
+// 点击"去支付" → 弹出支付方式选择
+const onOrderPay = () => {
+  payModeVisible.value = true
+}
 
-    // 注意：因小程序上线后被恶意投诉：理由为支付 0.01 元后不发货，现调整为模拟支付
-    await getPayMockAPI({ orderId: query.id })
-    // #endif
+// 选择支付方式后执行
+const onPayModeSelect = async (mode: 'wxpay' | 'alipay' | 'mock') => {
+  payModeVisible.value = false
+  if (isPaying.value) return
+  isPaying.value = true
 
-    // #ifdef H5 || APP-PLUS
-    // H5端 和 App 端未开通支付-模拟支付体验
-    await getPayMockAPI({ orderId: query.id })
-    // #endif
+  try {
+    if (mode === 'mock') {
+      // 模拟支付
+      await getPayMockAPI({ orderId: query.id })
+      uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}&mode=mock` })
+    } else if (mode === 'alipay') {
+      // 支付宝支付
+      // #ifdef H5
+      const res = await getPayAlipayAPI({ orderId: query.id })
+      if (res.result.mock) {
+        // 未配置支付宝凭证，降级模拟支付
+        uni.showToast({ icon: 'none', title: '未配置支付宝凭证，已切换为模拟支付' })
+        await getPayMockAPI({ orderId: query.id })
+        uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}&mode=mock` })
+      } else if (res.result.payUrl) {
+        // 跳转到支付宝收银台
+        window.location.href = res.result.payUrl
+      }
+      // #endif
+      // #ifndef H5
+      // 非 H5 端不支持支付宝网页支付，降级为模拟支付
+      uni.showToast({ icon: 'none', title: '当前端暂不支持支付宝支付，已切换为模拟支付' })
+      await getPayMockAPI({ orderId: query.id })
+      uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}&mode=mock` })
+      // #endif
+    } else {
+      // 微信支付
+      // #ifdef MP-WEIXIN
+      const res = await getPayWxPayMiniPayAPI({ orderId: query.id })
+      await wx.requestPayment(res.result)
+      uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}&mode=wxpay` })
+      // #endif
+      // #ifndef MP-WEIXIN
+      // 非微信小程序端不支持微信支付，降级为模拟支付
+      uni.showToast({ icon: 'none', title: '当前端暂不支持微信支付，已切换为模拟支付' })
+      await getPayMockAPI({ orderId: query.id })
+      uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}&mode=mock` })
+      // #endif
+    }
+  } catch (err) {
+    // 用户取消支付或支付失败
+    console.error('支付失败:', err)
+    uni.showToast({ icon: 'none', title: '支付已取消或失败' })
+  } finally {
+    isPaying.value = false
   }
-  // 关闭当前页，再跳转支付结果页
-  uni.redirectTo({ url: `/pagesOrder/payment/payment?id=${query.id}` })
 }
 
 // 是否为开发环境
@@ -152,10 +199,14 @@ const isDev = import.meta.env.DEV
 // 模拟发货
 const onOrderSend = async () => {
   if (isDev) {
-    await getMemberOrderConsignmentByIdAPI(query.id)
-    uni.showToast({ icon: 'success', title: '模拟发货完成' })
-    // 主动更新订单状态
-    order.value!.orderState = OrderState.DaiShouHuo
+    try {
+      await getMemberOrderConsignmentByIdAPI(query.id)
+      uni.showToast({ icon: 'success', title: '模拟发货完成' })
+      // 主动更新订单状态
+      if (order.value) order.value.orderState = OrderState.DaiShouHuo
+    } catch {
+      uni.showToast({ icon: 'none', title: '操作失败，请重试' })
+    }
   }
 }
 // 确认收货
@@ -166,9 +217,14 @@ const onOrderConfirm = () => {
     confirmColor: '#27BA9B',
     success: async (success) => {
       if (success.confirm) {
-        const res = await putMemberOrderReceiptByIdAPI(query.id)
-        // 更新订单状态
-        order.value = res.result
+        try {
+          await putMemberOrderReceiptByIdAPI(query.id)
+          uni.showToast({ icon: 'success', title: '确认收货成功' })
+          // 后端返回 result 为 null，重新拉取订单数据
+          getMemberOrderByIdData()
+        } catch {
+          uni.showToast({ icon: 'none', title: '操作失败，请重试' })
+        }
       }
     },
   })
@@ -181,8 +237,12 @@ const onOrderDelete = () => {
     confirmColor: '#27BA9B',
     success: async (success) => {
       if (success.confirm) {
-        await deleteMemberOrderAPI({ ids: [query.id] })
-        uni.redirectTo({ url: '/pagesOrder/list/list' })
+        try {
+          await deleteMemberOrderAPI({ ids: [query.id] })
+          uni.redirectTo({ url: '/pagesOrder/list/list' })
+        } catch {
+          uni.showToast({ icon: 'none', title: '删除失败，请重试' })
+        }
       }
     },
   })
@@ -190,14 +250,20 @@ const onOrderDelete = () => {
 
 // 取消订单
 const onOrderCancel = async () => {
-  // 发送请求
-  const res = await getMemberOrderCancelByIdAPI(query.id, { cancelReason: reason.value })
-  // 更新订单信息
-  order.value = res.result
-  // 关闭弹窗
-  popup.value?.close!()
-  // 轻提示
-  uni.showToast({ icon: 'none', title: '订单取消成功' })
+  try {
+    // 发送请求
+    await getMemberOrderCancelByIdAPI(query.id, { cancelReason: reason.value })
+    // 关闭弹窗
+    popup.value?.close!()
+    // 轻提示
+    uni.showToast({ icon: 'none', title: '订单取消成功' })
+    // 跳转到订单列表（后端返回 result 为 null，无法本地更新）
+    setTimeout(() => {
+      uni.redirectTo({ url: '/pagesOrder/list/list' })
+    }, 1500)
+  } catch {
+    uni.showToast({ icon: 'none', title: '取消失败，请重试' })
+  }
 }
 </script>
 
@@ -399,6 +465,9 @@ const onOrderCancel = async () => {
       <PageSkeleton />
     </template>
   </scroll-view>
+  <!-- 支付方式选择弹窗 -->
+  <PayModePopup :visible="payModeVisible" @select="onPayModeSelect" @close="payModeVisible = false" />
+
   <!-- 取消订单弹窗 -->
   <uni-popup ref="popup" type="bottom" background-color="#fff">
     <view class="popup-root">

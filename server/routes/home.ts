@@ -10,7 +10,12 @@ router.get('/banner', async (req, res) => {
     const site = Number(req.query.distributionSite) || 1
     const rows = await Banner.findAll({
       where: { distribution_site: site },
-      attributes: ['id', 'img_url', 'href_url', 'type'],
+      attributes: [
+        'id',
+        'type',
+        [fn('IFNULL', col('img_url'), ''), 'imgUrl'],
+        [fn('IFNULL', col('href_url'), ''), 'hrefUrl'],
+      ],
     })
     res.json({ code: '1', msg: '操作成功', result: rows })
   } catch (err) {

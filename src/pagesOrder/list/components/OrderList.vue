@@ -4,8 +4,9 @@ import { orderStateList } from '@/services/constants'
 import { putMemberOrderReceiptByIdAPI } from '@/services/order'
 import { deleteMemberOrderAPI } from '@/services/order'
 import { getMemberOrderAPI } from '@/services/order'
-import { getPayMockAPI, getPayWxPayMiniPayAPI } from '@/services/pay'
+import { getPayMockAPI, getPayWxPayMiniPayAPI, getPayAlipayAPI } from '@/services/pay'
 import type { OrderItem } from '@/types/order'
+import PayModePopup from '@/pagesOrder/payment/PayModePopup.vue'
 import type { OrderListParams } from '@/types/order'
 import { onMounted, ref } from 'vue'
 
@@ -37,19 +38,24 @@ const getMemberOrderData = async () => {
   }
   // 发送请求前，标记为加载中
   isLoading.value = true
-  // 发送请求
-  const res = await getMemberOrderAPI(queryParams)
-  // 发送请求后，重置标记
-  isLoading.value = false
-  // 数组追加
-  orderList.value.push(...res.result.items)
-  // 分页条件
-  if (queryParams.page < res.result.pages) {
-    // 页码累加
-    queryParams.page++
-  } else {
-    // 分页已结束
-    isFinish.value = true
+  try {
+    // 发送请求
+    const res = await getMemberOrderAPI(queryParams)
+    // 数组追加
+    orderList.value.push(...res.result.items)
+    // 分页条件
+    if (queryParams.page < res.result.pages) {
+      // 页码累加
+      queryParams.page++
+    } else {
+      // 分页已结束
+      isFinish.value = true
+    }
+  } catch {
+    uni.showToast({ icon: 'none', title: '加载失败，请重试' })
+  } finally {
+    // 无论成功失败，重置加载标记
+    isLoading.value = false
   }
 }
 
@@ -57,36 +63,74 @@ onMounted(() => {
   getMemberOrderData()
 })
 
-// 订单支付
-const onOrderPay = async (id: string) => {
-  if (import.meta.env.DEV) {
-    // 开发环境模拟支付
-    await getPayMockAPI({ orderId: id })
-  } else {
-    // #ifdef MP-WEIXIN
+// 支付方式弹窗
+const payModeVisible = ref(false)
+const currentPayOrderId = ref('')
+const isPaying = ref(false)
 
-    // 正式环境支付：1.获取支付订单信息，2.调用微信支付API
-    // const res = await getPayWxPayMiniPayAPI({ orderId: id })
-    // await wx.requestPayment(res.result)
+// 点击"去支付" → 弹出支付方式选择
+const onOrderPay = (id: string) => {
+  currentPayOrderId.value = id
+  payModeVisible.value = true
+}
 
-    // 注意：因小程序上线后被恶意投诉：理由为支付 0.01 元后不发货，现调整为模拟支付
-    await getPayMockAPI({ orderId: id })
-    // #endif
+// 选择支付方式后执行
+const onPayModeSelect = async (mode: 'wxpay' | 'alipay' | 'mock') => {
+  payModeVisible.value = false
+  const id = currentPayOrderId.value
+  if (!id || isPaying.value) return
+  isPaying.value = true
+
+  try {
+    if (mode === 'mock') {
+      await getPayMockAPI({ orderId: id })
+      uni.showToast({ title: '模拟支付成功' })
+      setTimeout(() => {
+        uni.showModal({
+          title: '温馨提示',
+          content: '此交易是模拟支付，您并未付款，不会导致实际购买商品或服务',
+          confirmText: '知道了',
+          showCancel: false,
+        })
+      }, 2000)
+    } else if (mode === 'alipay') {
+      // #ifdef H5
+      const res = await getPayAlipayAPI({ orderId: id })
+      if (res.result.mock) {
+        uni.showToast({ icon: 'none', title: '未配置支付宝凭证，已切换为模拟支付' })
+        await getPayMockAPI({ orderId: id })
+        uni.showToast({ title: '模拟支付成功' })
+      } else if (res.result.payUrl) {
+        window.location.href = res.result.payUrl
+        return // 跳转后不更新本地状态，等回调处理
+      }
+      // #endif
+      // #ifndef H5
+      uni.showToast({ icon: 'none', title: '当前端暂不支持支付宝支付，已切换为模拟支付' })
+      await getPayMockAPI({ orderId: id })
+      uni.showToast({ title: '模拟支付成功' })
+      // #endif
+    } else {
+      // #ifdef MP-WEIXIN
+      const res = await getPayWxPayMiniPayAPI({ orderId: id })
+      await wx.requestPayment(res.result)
+      uni.showToast({ icon: 'success', title: '支付成功' })
+      // #endif
+      // #ifndef MP-WEIXIN
+      uni.showToast({ icon: 'none', title: '当前端暂不支持微信支付，已切换为模拟支付' })
+      await getPayMockAPI({ orderId: id })
+      uni.showToast({ title: '模拟支付成功' })
+      // #endif
+    }
+    // 更新订单状态
+    const order = orderList.value.find((v) => v.id === id)
+    if (order) order.orderState = OrderState.DaiFaHuo
+  } catch (err) {
+    console.error('支付失败:', err)
+    uni.showToast({ icon: 'none', title: '支付已取消或失败' })
+  } finally {
+    isPaying.value = false
   }
-  // 成功提示
-  uni.showToast({ title: '模拟支付成功' })
-  // 模拟支付提示
-  setTimeout(() => {
-    wx.showModal({
-      title: '温馨提示',
-      content: '此交易是模拟支付，您并未付款，不会导致实际购买商品或服务',
-      confirmText: '知道了',
-      showCancel: false,
-    })
-  }, 2000)
-  // 更新订单状态
-  const order = orderList.value.find((v) => v.id === id)
-  order!.orderState = OrderState.DaiFaHuo
 }
 
 // 确认收货
@@ -96,11 +140,15 @@ const onOrderConfirm = (id: string) => {
     confirmColor: '#27BA9B',
     success: async (res) => {
       if (res.confirm) {
-        await putMemberOrderReceiptByIdAPI(id)
-        uni.showToast({ icon: 'success', title: '确认收货成功' })
-        // 确认成功，更新为待评价
-        const order = orderList.value.find((v) => v.id === id)
-        order!.orderState = OrderState.DaiPingJia
+        try {
+          await putMemberOrderReceiptByIdAPI(id)
+          uni.showToast({ icon: 'success', title: '确认收货成功' })
+          // 确认成功，更新为待评价
+          const order = orderList.value.find((v) => v.id === id)
+          if (order) order.orderState = OrderState.DaiPingJia
+        } catch {
+          uni.showToast({ icon: 'none', title: '操作失败，请重试' })
+        }
       }
     },
   })
@@ -113,10 +161,15 @@ const onOrderDelete = (id: string) => {
     confirmColor: '#27BA9B',
     success: async (res) => {
       if (res.confirm) {
-        await deleteMemberOrderAPI({ ids: [id] })
-        // 删除成功，界面中删除订单
-        const index = orderList.value.findIndex((v) => v.id === id)
-        orderList.value.splice(index, 1)
+        try {
+          await deleteMemberOrderAPI({ ids: [id] })
+          // 删除成功，界面中删除订单
+          const index = orderList.value.findIndex((v) => v.id === id)
+          orderList.value.splice(index, 1)
+          uni.showToast({ icon: 'success', title: '删除成功' })
+        } catch {
+          uni.showToast({ icon: 'none', title: '删除失败，请重试' })
+        }
       }
     },
   })
@@ -211,6 +264,9 @@ const onRefresherrefresh = async () => {
         </template>
       </view>
     </view>
+    <!-- 支付方式选择弹窗 -->
+    <PayModePopup :visible="payModeVisible" @select="onPayModeSelect" @close="payModeVisible = false" />
+
     <!-- 底部提示文字 -->
     <view class="loading-text" :style="{ paddingBottom: safeAreaInsets?.bottom + 'px' }">
       {{ isFinish ? '没有更多数据~' : '正在加载...' }}

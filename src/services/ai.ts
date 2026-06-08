@@ -242,6 +242,7 @@ export const postOutfitRecommendStreamAPI = (
                 fullReply += evt.text
                 callbacks.onChunk(fullReply)
               } else if (evt.type === 'image') {
+                console.log('[SSE] image event received:', evt.urls?.length, 'urls')
                 callbacks.onImages?.(evt.urls || [])
               } else if (evt.type === 'done') {
                 callbacks.onDone()

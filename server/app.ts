@@ -3,6 +3,9 @@ import express from 'express'
 import cors from 'cors'
 import path from 'path'
 
+// 注册 Sequelize 模型关联（必须在路由之前）
+import './models/associations'
+
 import homeRoutes from './routes/home'
 import hotRoutes from './routes/hot'
 import searchRoutes from './routes/search'

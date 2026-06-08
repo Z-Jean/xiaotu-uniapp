@@ -88,6 +88,12 @@
   },
   /* 快应用特有相关 */
   "quickapp": {},
+  /* uniCloud配置 */
+  "uniCloud": {
+      "provider": "aliyun", // 你用的是阿里云就写 aliyun，腾讯云写 tencent
+      "spaceId": "mp-5071f268-bf0e-453e-a065-714dff0c2da0", // 从 uniCloud 控制台复制
+      "clientSecret": "lij/b9ET9u7ZkhKkgFykvw==" // 阿里云必填，腾讯云留空 ""
+    },
   /* 网页端特有配置 */
   "h5": {
     "router": {
