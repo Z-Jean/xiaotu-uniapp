@@ -14,5 +14,5 @@ export const API_BASE = import.meta.env.DEV ? 'http://localhost:3000' : ''
 
 // #ifndef H5
 // 小程序/App 端：改为你的服务器 IP 或域名
-export const API_BASE = 'http://10.107.246.104:3000'
+export const API_BASE = 'http://39.105.156.70:3000'
 // #endif
