@@ -210,7 +210,9 @@ const sendOutfitMessage = async (description: string) => {
       onImages(urls) {
         const msg = messages.value.find((m) => m.id === aiMsgId)
         if (msg) {
-          msg.images = urls
+          console.log('[onImages] setting images:', urls.length)
+          msg.images.splice(0, msg.images.length, ...urls)
+          console.log('[onImages] msg.images after:', msg.images.length)
           scrollToBottom()
         }
       },
