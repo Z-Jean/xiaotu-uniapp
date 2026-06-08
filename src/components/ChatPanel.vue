@@ -141,6 +141,7 @@ const sendMessage = async (text?: string) => {
   }))
 
   isLoading.value = true
+  console.log('[sendMessage] chatMode:', chatMode.value, '| thinking:', chatMode.value === 'thinking')
 
   // #ifdef H5
   await streamChat(content, history, chatMode.value === 'thinking')

@@ -316,6 +316,7 @@ router.post('/chat', async (req: Request, res: Response) => {
 router.post('/chat/stream', async (req: Request, res: Response) => {
   try {
     const { message, history: clientHistory = [], sessionId = 'default', thinking = false } = req.body
+    console.log('[chat/stream] thinking:', thinking, '| model:', thinking && DASHSCOPE_API_KEY ? 'qwq-plus' : 'mimo-v2.5')
     if (!message) {
       res.json({ code: '0', msg: '请输入消息', result: null })
       return
