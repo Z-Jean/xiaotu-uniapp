@@ -962,11 +962,13 @@ const onGoodsClick = (goods: { id: string }) => {
   grid-template-columns: 1fr 1fr;
   gap: 12rpx;
   margin-top: 16rpx;
+  width: 400rpx;
+  background-color: red;
 }
 
 .outfit-image {
   width: 100%;
-  aspect-ratio: 1;
+  height: 194rpx;
   border-radius: 12rpx;
   background-color: #f5f5f5;
 }
