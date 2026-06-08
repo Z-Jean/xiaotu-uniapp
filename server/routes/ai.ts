@@ -322,7 +322,6 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     const { message, history: clientHistory = [], sessionId = 'default', thinking = false, websearch = false } = req.body
     const isThinkingMode = thinking && DASHSCOPE_API_KEY
     const isWebsearchMode = websearch && DASHSCOPE_API_KEY
-    console.log('[chat/stream] mode:', isThinkingMode ? 'thinking' : isWebsearchMode ? 'websearch' : 'normal')
     if (!message) {
       res.json({ code: '0', msg: '请输入消息', result: null })
       return
@@ -871,7 +870,6 @@ router.post('/outfit-recommend/stream', async (req: Request, res: Response) => {
       // 3. 轮询图片结果
       const images = await pollImageTask(taskId)
       if (images.length) {
-        console.log('[outfit-stream] sending image event:', images.length, 'urls')
         sendEvent({ type: 'image', urls: images })
       }
     }

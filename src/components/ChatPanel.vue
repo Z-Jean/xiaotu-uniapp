@@ -139,7 +139,6 @@ const sendMessage = async (text?: string) => {
   }))
 
   isLoading.value = true
-  console.log('[sendMessage] chatMode:', chatMode.value, '| thinking:', chatMode.value === 'thinking')
 
   // #ifdef H5
   await streamChat(content, history, chatMode.value === 'thinking', chatMode.value === 'websearch')
@@ -208,9 +207,7 @@ const sendOutfitMessage = async (description: string) => {
       onImages(urls) {
         const msg = messages.value.find((m) => m.id === aiMsgId)
         if (msg) {
-          console.log('[onImages] setting images:', urls.length)
           msg.images.splice(0, msg.images.length, ...urls)
-          console.log('[onImages] msg.images after:', msg.images.length)
           scrollToBottom()
         }
       },
@@ -930,13 +927,11 @@ const onGoodsClick = (goods: { id: string }) => {
   grid-template-columns: 1fr 1fr;
   gap: 12rpx;
   margin-top: 16rpx;
-  width: 400rpx;
-  background-color: red;
 }
 
 .outfit-image {
   width: 100%;
-  height: 194rpx;
+  aspect-ratio: 1;
   border-radius: 12rpx;
   background-color: #f5f5f5;
 }
