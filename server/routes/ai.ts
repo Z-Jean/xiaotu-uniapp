@@ -317,6 +317,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
   try {
     const { message, history: clientHistory = [], sessionId = 'default', thinking = false } = req.body
     console.log('[chat/stream] thinking:', thinking, '| model:', thinking && DASHSCOPE_API_KEY ? 'qwq-plus' : 'mimo-v2.5')
+    console.log('[chat/stream] using prompt:', thinking && DASHSCOPE_API_KEY ? 'THINKING_SYSTEM_PROMPT' : 'SYSTEM_PROMPT')
     if (!message) {
       res.json({ code: '0', msg: '请输入消息', result: null })
       return
@@ -428,6 +429,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
           const delta = chunk.choices?.[0]?.delta?.content
           if (delta) {
             // 分段处理 think 标签
+            if (delta.includes('<think>')) console.log('[chat/stream] found <think> tag!')
             let remaining = delta
             while (remaining.length > 0) {
               if (inThinking) {
