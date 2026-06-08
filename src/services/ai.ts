@@ -35,6 +35,7 @@ export const postAiChatStreamAPI = (
     history: Array<{ role: string; content: string }>
     sessionId?: string
     thinking?: boolean
+    websearch?: boolean
   },
   callbacks: StreamCallbacks,
 ) => {

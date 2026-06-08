@@ -22,8 +22,6 @@ interface ChatMessage {
   streaming?: boolean
   /** 深度思考过程 */
   thinking?: string
-  /** UI状态：思考过程是否展开 */
-  _thinkingExpanded?: boolean
   /** 穿搭推荐图片 */
   images?: string[]
 }
@@ -36,8 +34,8 @@ const scrollToId = ref('')
 const pendingImage = ref('')
 let msgId = 0
 
-// 聊天模式：normal / thinking / outfit
-const chatMode = ref<'normal' | 'thinking' | 'outfit'>('normal')
+// 聊天模式：normal / thinking / outfit / websearch
+const chatMode = ref<'normal' | 'thinking' | 'outfit' | 'websearch'>('normal')
 
 // 快捷入口
 const quickActions = [
@@ -144,7 +142,7 @@ const sendMessage = async (text?: string) => {
   console.log('[sendMessage] chatMode:', chatMode.value, '| thinking:', chatMode.value === 'thinking')
 
   // #ifdef H5
-  await streamChat(content, history, chatMode.value === 'thinking')
+  await streamChat(content, history, chatMode.value === 'thinking', chatMode.value === 'websearch')
   // #endif
 
   // #ifndef H5
@@ -273,7 +271,7 @@ const previewOutfitImage = (urls: string[], current: number) => {
 }
 
 // SSE 流式聊天（H5）
-const streamChat = async (content: string, history: Array<{ role: string; content: string }>, thinking = false) => {
+const streamChat = async (content: string, history: Array<{ role: string; content: string }>, thinking = false, websearch = false) => {
   const aiMsgId = ++msgId
   messages.value.push({
     id: aiMsgId,
@@ -284,7 +282,7 @@ const streamChat = async (content: string, history: Array<{ role: string; conten
   scrollToBottom()
 
   postAiChatStreamAPI(
-    { message: content, history, sessionId: 'default', thinking },
+    { message: content, history, sessionId: 'default', thinking, websearch },
     {
       onThinking(text) {
         const msg = messages.value.find((m) => m.id === aiMsgId)
@@ -554,6 +552,13 @@ const onGoodsClick = (goods: { id: string }) => {
           @tap="chatMode = chatMode === 'outfit' ? 'normal' : 'outfit'"
         >
           👗 穿搭推荐
+        </view>
+        <view
+          class="mode-tag"
+          :class="{ active: chatMode === 'websearch' }"
+          @tap="chatMode = chatMode === 'websearch' ? 'normal' : 'websearch'"
+        >
+          🔍 联网搜索
         </view>
       </view>
 

@@ -319,9 +319,10 @@ router.post('/chat', async (req: Request, res: Response) => {
 
 router.post('/chat/stream', async (req: Request, res: Response) => {
   try {
-    const { message, history: clientHistory = [], sessionId = 'default', thinking = false } = req.body
-    console.log('[chat/stream] thinking:', thinking, '| model:', thinking && DASHSCOPE_API_KEY ? 'qwq-plus' : 'mimo-v2.5')
-    console.log('[chat/stream] using prompt:', thinking && DASHSCOPE_API_KEY ? 'THINKING_SYSTEM_PROMPT' : 'SYSTEM_PROMPT')
+    const { message, history: clientHistory = [], sessionId = 'default', thinking = false, websearch = false } = req.body
+    const isThinkingMode = thinking && DASHSCOPE_API_KEY
+    const isWebsearchMode = websearch && DASHSCOPE_API_KEY
+    console.log('[chat/stream] mode:', isThinkingMode ? 'thinking' : isWebsearchMode ? 'websearch' : 'normal')
     if (!message) {
       res.json({ code: '0', msg: '请输入消息', result: null })
       return
@@ -353,7 +354,6 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
 
     // 4. 拼接历史
     const serverHistory = getHistory(sessionId)
-    const isThinkingMode = thinking && DASHSCOPE_API_KEY
     const systemPrompt = isThinkingMode ? THINKING_SYSTEM_PROMPT : SYSTEM_PROMPT
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt + (isThinkingMode ? '' : goodsInfo) },
@@ -362,15 +362,31 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     ]
 
     // 5. 流式调用 LLM API
-    //    深度思考模式 → QwQ（Dashscope，会输出 <think> 标签）
+    //    深度思考 → QwQ
+    //    联网搜索 → Qwen（Dashscope + enable_search）
     //    普通模式 → MiMo
-    const apiUrl = isThinkingMode
+    const useDashscope = isThinkingMode || isWebsearchMode
+    const apiUrl = useDashscope
       ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
       : 'https://api.xiaomimimo.com/v1/chat/completions'
-    const apiToken = isThinkingMode
-      ? DASHSCOPE_API_KEY
-      : process.env.MIMO_API_KEY
-    const model = isThinkingMode ? 'qwq-plus' : 'mimo-v2.5'
+    const apiToken = useDashscope ? DASHSCOPE_API_KEY : process.env.MIMO_API_KEY
+    const model = isThinkingMode ? 'qwq-plus' : isWebsearchMode ? 'qwen-plus' : 'mimo-v2.5'
+
+    const requestBody: any = {
+      model,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      max_tokens: isThinkingMode ? 2000 : 800,
+      temperature: isThinkingMode ? 0.6 : 0.7,
+      stream: true,
+    }
+
+    // 联网搜索模式：启用 Dashscope 搜索增强
+    if (isWebsearchMode) {
+      requestBody.enable_search = true
+    }
 
     const mimoResponse = await fetch(apiUrl, {
       method: 'POST',
@@ -378,16 +394,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiToken}`,
       },
-      body: JSON.stringify({
-        model,
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        max_tokens: isThinkingMode ? 2000 : 800,
-        temperature: isThinkingMode ? 0.6 : 0.7,
-        stream: true,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     if (!mimoResponse.ok) {
@@ -411,7 +418,7 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     const decoder = new TextDecoder()
     let buffer = ''
     let fullReply = ''
-    let inThinking = true // 一开始是思考阶段，遇到 ===ANSWER=== 后切换
+    let inThinking = isThinkingMode // 只有深度思考模式才用 ===ANSWER=== 分隔
 
     for (;;) {
       const { done, value } = await reader.read()
