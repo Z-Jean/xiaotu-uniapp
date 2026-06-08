@@ -476,19 +476,9 @@ const onGoodsClick = (goods: { id: string }) => {
             class="msg-avatar"
             src="/static/lottie/assistant.png"
           />
-          <!-- 深度思考折叠 -->
+          <!-- 深度思考过程（直接显示，小字区分） -->
           <view v-if="msg.thinking" class="thinking-block">
-            <view class="thinking-toggle" @tap="msg._thinkingExpanded = !msg._thinkingExpanded">
-              <text class="thinking-icon">💡</text>
-              <text class="thinking-label">
-                查看思考过程（{{ msg.thinking.split('\n').filter((s: string) => s.trim()).length }}
-                步）
-              </text>
-              <text class="thinking-arrow">{{ msg._thinkingExpanded ? '▲' : '▼' }}</text>
-            </view>
-            <view v-if="msg._thinkingExpanded" class="thinking-content">
-              {{ msg.thinking }}
-            </view>
+            <text class="thinking-content">{{ msg.thinking }}</text>
           </view>
           <view class="bubble" :class="[msg.role, { streaming: msg.streaming }]">
             <!-- 图片消息 -->
@@ -852,47 +842,20 @@ const onGoodsClick = (goods: { id: string }) => {
   }
 }
 
-// 深度思考折叠
+// 深度思考过程
 .thinking-block {
-  margin-bottom: 16rpx;
-  border-radius: 12rpx;
-  overflow: hidden;
-}
-
-.thinking-toggle {
-  display: flex;
-  align-items: center;
-  padding: 16rpx 20rpx;
-  background-color: #f0f7ff;
-  border-radius: 12rpx;
-  gap: 8rpx;
-}
-
-.thinking-icon {
-  font-size: 28rpx;
-}
-
-.thinking-label {
-  flex: 1;
-  font-size: 24rpx;
-  color: #6b8eb5;
-}
-
-.thinking-arrow {
-  font-size: 22rpx;
-  color: #6b8eb5;
+  margin-bottom: 8rpx;
+  padding: 12rpx 16rpx;
+  background-color: #f8f9fa;
+  border-radius: 8rpx;
+  border-left: 4rpx solid #c0c0c0;
 }
 
 .thinking-content {
-  padding: 20rpx;
-  background-color: #f8f9fa;
-  border-radius: 0 0 12rpx 12rpx;
-  font-size: 24rpx;
-  color: #666;
-  line-height: 1.8;
+  font-size: 22rpx;
+  color: #999;
+  line-height: 1.6;
   white-space: pre-wrap;
-  max-height: 400rpx;
-  overflow-y: auto;
 }
 
 .mode-bar {
