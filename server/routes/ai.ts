@@ -81,9 +81,20 @@ const SYSTEM_PROMPT = [
   '- 回复简洁友好，适合手机阅读，控制在100字以内',
   '- 如果没有匹配的商品，告诉用户暂时没有相关推荐',
   '',
-  '当你需要分析、推理、比较或做复杂判断时，使用<think>标签展示你的思考过程。',
-  '格式：<think>你的逐步推理过程...</think>最终给用户的回答',
-  '不需要深度思考的简单问题可以跳过<think>标签，直接回答。',
+].join('\n')
+
+// 深度思考模式的 system prompt（QwQ 推理模型专用）
+const THINKING_SYSTEM_PROMPT = [
+  '你是小兔鲜儿的AI购物助手"小兔"🐰。',
+  '',
+  '【重要】你必须严格按照以下格式回复：',
+  '<think>',
+  '在这里写你的思考过程，包括分析、推理、比较等步骤',
+  '你可以分多步思考，每步一行',
+  '</think>',
+  '在这里写最终给用户的回答（简洁友好，100字以内）',
+  '',
+  '不要跳过<think>标签，每次回复都必须先思考再回答。',
 ].join('\n')
 
 // ─── LangChain Tools ───────────────────────────────────────
@@ -336,8 +347,10 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
 
     // 4. 拼接历史
     const serverHistory = getHistory(sessionId)
+    const isThinkingMode = thinking && DASHSCOPE_API_KEY
+    const systemPrompt = isThinkingMode ? THINKING_SYSTEM_PROMPT : SYSTEM_PROMPT
     const messages: ChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT + goodsInfo },
+      { role: 'system', content: systemPrompt + (isThinkingMode ? '' : goodsInfo) },
       ...(serverHistory.length ? serverHistory : clientHistory.slice(-10)),
       { role: 'user', content: message },
     ]
@@ -345,7 +358,6 @@ router.post('/chat/stream', async (req: Request, res: Response) => {
     // 5. 流式调用 LLM API
     //    深度思考模式 → QwQ（Dashscope，会输出 <think> 标签）
     //    普通模式 → MiMo
-    const isThinkingMode = thinking && DASHSCOPE_API_KEY
     const apiUrl = isThinkingMode
       ? 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
       : 'https://api.xiaomimimo.com/v1/chat/completions'
